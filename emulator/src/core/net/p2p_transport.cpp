@@ -2,7 +2,9 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 
 #include <algorithm>
+#include <bit>
 #include <cstring>
+#include <iterator>
 #include <string>
 #include <tuple>
 #include <fmt/format.h>
@@ -88,7 +90,19 @@ constexpr auto RelayProbeInterval = std::chrono::seconds(5);     // direct copy 
 constexpr auto RelayRegisterInterval = std::chrono::seconds(10); // the relay forgets after 30 s
 constexpr auto RelayRegisterRetry = std::chrono::seconds(2);
 constexpr auto RelayAckLifetime = std::chrono::seconds(30);
+// A relay carrying peers is asked more often, so a dead one is left within a few seconds.
+constexpr auto RelayInUseInterval = std::chrono::seconds(2);
+constexpr auto RelayAckTimeout = std::chrono::seconds(3); // registers unanswered: relay is down
+// A peer that sends through several relays delivers each packet through all of them within
+// milliseconds; one that has settled on a relay goes quiet on the others.
+constexpr auto RelaySettledWindow = std::chrono::seconds(1);
+constexpr auto RelayRttSlack = std::chrono::milliseconds(5); // closer than this: list order wins
+constexpr size_t RelayMaxUnconfirmed = 3;
 constexpr size_t RelayMaxPaths = 256;
+
+constexpr u32 Bit(size_t i) {
+    return 1u << i;
+}
 
 void PutRelayAddress(std::vector<u8>& out, const Endpoint& e) {
     const auto* in = reinterpret_cast<const sockaddr_in*>(&e.addr);
@@ -295,8 +309,12 @@ std::optional<Clock::time_point> Transport::EarliestDeadline() const {
             earliest = d;
         }
     }
-    if (relay_ && !relay_identity_.empty() && (!earliest || relay_next_register_ < *earliest)) {
-        earliest = relay_next_register_;
+    if (relay_ && !relay_identity_.empty()) {
+        for (const RelayServer& relay : relays_) {
+            if (!earliest || relay.next_register < *earliest) {
+                earliest = relay.next_register;
+            }
+        }
     }
     return earliest;
 }
@@ -333,13 +351,17 @@ Error Transport::SendPacket(std::span<const u8> packet, const Endpoint& to) {
         }
     }
     bool direct = true;
-    bool relayed = false;
+    u32 relays = 0;
+    const auto now = Clock::now();
     if (relay_) {
-        ChooseRoute(to, Clock::now(), &direct, &relayed);
+        ChooseRoute(to, now, &direct, &relays);
     }
     Error error = Error::Ok;
-    if (relayed) {
-        error = SendViaRelay(packet, to);
+    for (size_t i = 0; i < relays_.size(); ++i) {
+        if (relays & Bit(i)) {
+            relays_[i].last_forward = now;
+            error = SendViaRelay(packet, to, relays_[i].address);
+        }
     }
     if (direct) {
         error = SendDirect(packet, to);
@@ -353,7 +375,8 @@ Error Transport::SendDirect(std::span<const u8> packet, const Endpoint& to) {
     return r.error;
 }
 
-Error Transport::SendViaRelay(std::span<const u8> packet, const Endpoint& to) {
+Error Transport::SendViaRelay(std::span<const u8> packet, const Endpoint& to,
+                              const Endpoint& relay) {
     std::vector<u8> wrapped;
     wrapped.reserve(RelayHeaderSize + 2 * RelayAddressSize + packet.size());
     wrapped.insert(wrapped.end(), RelayMagic.begin(), RelayMagic.end());
@@ -361,16 +384,21 @@ Error Transport::SendViaRelay(std::span<const u8> packet, const Endpoint& to) {
     PutRelayAddress(wrapped, to);
     PutRelayAddress(wrapped, relay_identity_.front());
     wrapped.insert(wrapped.end(), packet.begin(), packet.end());
-    return SendDirect(wrapped, relay_->relay);
+    return SendDirect(wrapped, relay);
 }
 
 void Transport::SetRelay(const std::optional<RelayConfig>& config) {
     std::scoped_lock lock{mutex_};
     relay_ = config;
+    relays_.clear();
+    if (relay_) {
+        for (const Endpoint& address : relay_->relays) {
+            if (relays_.size() < MaxRelays && !RelayIndex(address)) {
+                relays_.push_back({.address = address, .next_register = Clock::now()});
+            }
+        }
+    }
     relay_paths_.clear();
-    relay_last_ack_.reset();
-    relay_announced_ = false;
-    relay_next_register_ = Clock::now();
     kick_.Signal();
 }
 
@@ -384,25 +412,79 @@ void Transport::SetRelayIdentity(std::vector<Endpoint> addresses) {
         return;
     }
     relay_identity_ = std::move(addresses);
-    relay_announced_ = false;
-    relay_next_register_ = Clock::now();
+    for (RelayServer& relay : relays_) {
+        relay.announced = false;
+        relay.next_register = Clock::now();
+    }
     kick_.Signal();
 }
 
+bool Transport::RelayUsable(const RelayServer& relay, Clock::time_point now) const {
+    return Within(relay.last_ack, now, RelayAckLifetime) &&
+           !(relay.unanswered_since && now - *relay.unanswered_since >= RelayAckTimeout);
+}
+
+u32 Transport::UsableRelays(Clock::time_point now) const {
+    u32 usable = 0;
+    for (size_t i = 0; i < relays_.size(); ++i) {
+        if (RelayUsable(relays_[i], now)) {
+            usable |= Bit(i);
+        }
+    }
+    return usable;
+}
+
+// Lowest round trip first; relays never measured come last.
+u32 Transport::FastestRelays(u32 candidates, size_t count) const {
+    u32 chosen = 0;
+    for (size_t n = 0; n < count; ++n) {
+        std::optional<size_t> best;
+        for (size_t i = 0; i < relays_.size(); ++i) {
+            if (!(candidates & Bit(i)) || (chosen & Bit(i))) {
+                continue;
+            }
+            const auto& rtt = relays_[i].rtt;
+            const auto& best_rtt = best ? relays_[*best].rtt : std::nullopt;
+            if (!best || (rtt && (!best_rtt || *rtt + RelayRttSlack < *best_rtt))) {
+                best = i;
+            }
+        }
+        if (!best) {
+            break;
+        }
+        chosen |= Bit(*best);
+    }
+    return chosen;
+}
+
 void Transport::RelayTimer(Clock::time_point now) {
-    if (!relay_ || relay_identity_.empty() || now < relay_next_register_) {
+    if (!relay_ || relay_identity_.empty()) {
         return;
     }
-    std::vector<u8> packet(RelayMagic.begin(), RelayMagic.end());
-    packet.push_back(RelayRegister);
-    packet.push_back(static_cast<u8>(relay_identity_.size()));
-    for (const Endpoint& address : relay_identity_) {
-        PutRelayAddress(packet, address);
+    for (RelayServer& relay : relays_) {
+        const bool usable = RelayUsable(relay, now);
+        if (relay.usable && !usable) {
+            LOG_WARNING(Lib_Net, "P2P relay {}: no answer, not used until it answers again",
+                        Describe(relay.address));
+            relay.announced = false;
+        }
+        relay.usable = usable;
+        if (now < relay.next_register) {
+            continue;
+        }
+        std::vector<u8> packet(RelayMagic.begin(), RelayMagic.end());
+        packet.push_back(RelayRegister);
+        packet.push_back(static_cast<u8>(relay_identity_.size()));
+        for (const Endpoint& address : relay_identity_) {
+            PutRelayAddress(packet, address);
+        }
+        SendDirect(packet, relay.address);
+        relay.last_register = now;
+        if (!relay.unanswered_since) {
+            relay.unanswered_since = now;
+        }
+        relay.next_register = now + RelayRegisterRetry; // pushed back by the answer
     }
-    SendDirect(packet, relay_->relay);
-    relay_next_register_ =
-        now + (Within(relay_last_ack_, now, 2 * RelayRegisterInterval) ? RelayRegisterInterval
-                                                                       : RelayRegisterRetry);
     if (relay_paths_.size() > RelayMaxPaths) {
         std::erase_if(relay_paths_, [now](const auto& entry) {
             return now - entry.second.last_used > std::chrono::minutes(2);
@@ -410,8 +492,17 @@ void Transport::RelayTimer(Clock::time_point now) {
     }
 }
 
+std::optional<size_t> Transport::RelayIndex(const Endpoint& endpoint) const {
+    for (size_t i = 0; i < relays_.size(); ++i) {
+        if (relays_[i].address == endpoint) {
+            return i;
+        }
+    }
+    return std::nullopt;
+}
+
 bool Transport::IsRelayablePeer(const Endpoint& endpoint) const {
-    if (endpoint.Family() != AF_INET || endpoint == relay_->relay) {
+    if (endpoint.Family() != AF_INET || RelayIndex(endpoint)) {
         return false;
     }
     const u32 ip = ntohl(reinterpret_cast<const sockaddr_in*>(&endpoint.addr)->sin_addr.s_addr);
@@ -421,51 +512,119 @@ bool Transport::IsRelayablePeer(const Endpoint& endpoint) const {
     return std::ranges::find(relay_->direct_only, endpoint) == relay_->direct_only.end();
 }
 
-void Transport::SetViaRelay(PeerPath& path, const Endpoint& peer, bool via_relay,
-                            const char* reason) {
-    if (path.via_relay == via_relay) {
+void Transport::SetRoute(PeerPath& path, const Endpoint& peer, u32 relays, const char* reason) {
+    if (path.route == relays && (relays == 0 || path.route_reason == reason)) {
         return;
     }
-    path.via_relay = via_relay;
-    LOG_INFO(Lib_Net, "P2P peer {}: {} ({})", Describe(peer),
-             via_relay ? "now through the relay" : "direct again", reason);
+    path.route = relays;
+    path.route_reason = reason;
+    if (relays == 0) {
+        LOG_INFO(Lib_Net, "P2P peer {}: direct again ({})", Describe(peer), reason);
+        return;
+    }
+    std::string through;
+    for (size_t i = 0; i < relays_.size(); ++i) {
+        if (relays & Bit(i)) {
+            const auto& rtt = relays_[i].rtt;
+            fmt::format_to(
+                std::back_inserter(through), "{}{} ({})", through.empty() ? "" : ", ",
+                Describe(relays_[i].address),
+                rtt ? fmt::format("{} ms",
+                                  std::chrono::duration_cast<std::chrono::milliseconds>(*rtt).count())
+                    : std::string{"no round trip yet"});
+        }
+    }
+    LOG_INFO(Lib_Net, "P2P peer {}: through relay{} {} ({})", Describe(peer),
+             std::popcount(relays) > 1 ? "s" : "", through, reason);
+}
+
+// Both ends of a pair must settle on the same relay, but neither knows the other's round trips.
+// So only one end picks: the one whose address sorts first (both compare the same two
+// addresses). The other sends through every relay the peer reaches it by until the peer has
+// settled, then uses the relay the peer uses.
+u32 Transport::ChooseRelays(PeerPath& path, const Endpoint& peer, Clock::time_point now,
+                            u32 usable) {
+    u32 confirmed = 0;
+    std::optional<size_t> newest;
+    for (size_t i = 0; i < relays_.size(); ++i) {
+        if ((usable & Bit(i)) && Within(path.relay_rx[i], now, RelayConfirmed)) {
+            confirmed |= Bit(i);
+            if (!newest || *path.relay_rx[i] > *path.relay_rx[*newest]) {
+                newest = i;
+            }
+        }
+    }
+    if (confirmed == 0) {
+        path.relay.reset();
+        const u32 relays = FastestRelays(usable, RelayMaxUnconfirmed);
+        SetRoute(path, peer, relays, "trying, no answer through a relay yet");
+        return relays;
+    }
+    const bool kept = path.relay && (confirmed & Bit(*path.relay));
+    if (relay_identity_.front() < peer) {
+        if (!kept) {
+            path.relay = std::countr_zero(FastestRelays(confirmed, 1));
+        }
+        SetRoute(path, peer, Bit(*path.relay), "lowest round trip, chosen by us");
+        return Bit(*path.relay);
+    }
+    bool settled = true;
+    for (size_t i = 0; i < relays_.size(); ++i) {
+        if (i != *newest && path.relay_rx[i] &&
+            *path.relay_rx[*newest] - *path.relay_rx[i] < RelaySettledWindow) {
+            settled = false;
+        }
+    }
+    if (settled) {
+        path.relay = *newest;
+    } else if (!kept) {
+        path.relay.reset();
+        SetRoute(path, peer, confirmed, "waiting for the peer to pick one");
+        return confirmed;
+    }
+    SetRoute(path, peer, Bit(*path.relay), "the relay the peer uses");
+    return Bit(*path.relay);
 }
 
 void Transport::ChooseRoute(const Endpoint& to, Clock::time_point now, bool* direct,
-                            bool* relayed) {
+                            u32* relays) {
     if (!IsRelayablePeer(to)) {
         return;
     }
     PeerPath& path = relay_paths_[to];
     path.last_used = now;
+    const u32 usable = UsableRelays(now);
     if (relay_->relay_only) {
         // Before the server has told us our address there is nothing to send as.
         *direct = false;
-        *relayed = !relay_identity_.empty();
-        if (*relayed) {
-            SetViaRelay(path, to, true, "relay only");
+        if (!relay_identity_.empty()) {
+            const u32 all = static_cast<u32>(Bit(relays_.size()) - 1);
+            *relays = ChooseRelays(path, to, now, usable != 0 ? usable : all);
         }
         return;
     }
     if (Within(path.last_direct_rx, now, RelayDirectFresh)) {
-        SetViaRelay(path, to, false, "direct traffic seen");
+        path.relay.reset();
+        SetRoute(path, to, 0, "direct traffic seen");
         return;
     }
     if (!path.unanswered_since) {
         path.unanswered_since = now;
     }
-    if (relay_identity_.empty() || !Within(relay_last_ack_, now, RelayAckLifetime)) {
-        SetViaRelay(path, to, false, "relay not reachable");
+    if (relay_identity_.empty() || usable == 0) {
+        SetRoute(path, to, 0, "no relay reachable");
         return;
     }
-    // The peer reaching us through the relay means it is registered there, so the relay alone
-    // is enough. Until then the relay is a guess and the direct copy stays.
-    const bool confirmed = Within(path.last_relay_rx, now, RelayConfirmed);
+    // The peer reaching us through a relay means it is registered there, so that relay alone
+    // is enough. Until then the relays are a guess and the direct copy stays.
+    bool confirmed = false;
+    for (size_t i = 0; i < relays_.size(); ++i) {
+        confirmed |= (usable & Bit(i)) && Within(path.relay_rx[i], now, RelayConfirmed);
+    }
     if (!confirmed && now - *path.unanswered_since < RelayDirectTimeout) {
         return;
     }
-    SetViaRelay(path, to, true, confirmed ? "peer answers through the relay" : "no direct answer");
-    *relayed = true;
+    *relays = ChooseRelays(path, to, now, usable);
     *direct = !confirmed;
     if (confirmed && now - path.last_probe >= RelayProbeInterval) {
         path.last_probe = now; // lets a direct path that starts working be noticed
@@ -475,8 +634,8 @@ void Transport::ChooseRoute(const Endpoint& to, Clock::time_point now, bool* dir
 
 void Transport::OnReceive(std::span<const u8> packet, const Endpoint& from, Clock::time_point now) {
     if (relay_) {
-        if (from == relay_->relay) {
-            HandleRelayPacket(packet, now);
+        if (const auto relay = RelayIndex(from)) {
+            HandleRelayPacket(*relay, packet, now);
             return;
         }
         if (IsRelayablePeer(from)) {
@@ -492,11 +651,13 @@ void Transport::OnReceive(std::span<const u8> packet, const Endpoint& from, Cloc
     HandlePacket(packet, from, now);
 }
 
-void Transport::HandleRelayPacket(std::span<const u8> packet, Clock::time_point now) {
+void Transport::HandleRelayPacket(size_t index, std::span<const u8> packet,
+                                  Clock::time_point now) {
     if (packet.size() < RelayHeaderSize ||
         std::memcmp(packet.data(), RelayMagic.data(), RelayMagic.size()) != 0) {
         return;
     }
+    RelayServer& relay = relays_[index];
     const auto body = packet.subspan(RelayHeaderSize);
     switch (packet[RelayMagic.size()]) {
     case RelayRegisterAck: {
@@ -504,19 +665,31 @@ void Transport::HandleRelayPacket(std::span<const u8> packet, Clock::time_point 
             return;
         }
         const bool accepted = body[0] != 0;
+        relay.unanswered_since.reset();
         if (accepted) {
-            relay_last_ack_ = now;
+            const auto sample = now - relay.last_register;
+            relay.rtt = relay.rtt ? (*relay.rtt * 3 + sample) / 4 : sample;
+            relay.last_ack = now;
+            relay.next_register =
+                relay.last_register + (now - relay.last_forward < RelayConfirmed
+                                           ? RelayInUseInterval
+                                           : RelayRegisterInterval);
         }
-        if (!relay_announced_) {
-            relay_announced_ = true;
+        if (!relay.announced) {
+            relay.announced = true;
             const std::string seen = Describe(GetRelayAddress(body.data() + 1));
             if (accepted) {
-                LOG_INFO(Lib_Net, "P2P relay {}: registered as {} ({} of {} addresses), seen as {}",
-                         Describe(relay_->relay), Describe(relay_identity_.front()), body[0],
-                         relay_identity_.size(), seen);
+                LOG_INFO(Lib_Net,
+                         "P2P relay {}: registered as {} ({} of {} addresses), seen as {}, "
+                         "round trip {} ms",
+                         Describe(relay.address), Describe(relay_identity_.front()), body[0],
+                         relay_identity_.size(), seen,
+                         std::chrono::duration_cast<std::chrono::milliseconds>(
+                             relay.rtt.value_or(Clock::duration{}))
+                             .count());
             } else {
                 LOG_WARNING(Lib_Net, "P2P relay {}: registration as {} refused, seen as {}",
-                            Describe(relay_->relay), Describe(relay_identity_.front()), seen);
+                            Describe(relay.address), Describe(relay_identity_.front()), seen);
             }
         }
         break;
@@ -530,7 +703,7 @@ void Transport::HandleRelayPacket(std::span<const u8> packet, Clock::time_point 
             return;
         }
         PeerPath& path = relay_paths_[peer];
-        path.last_relay_rx = now;
+        path.relay_rx[index] = now;
         path.last_used = now;
         HandlePacket(body.subspan(RelayAddressSize), peer, now);
         break;

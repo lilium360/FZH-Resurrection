@@ -258,44 +258,65 @@ void ConfigureP2PRelay(u32 server_addr, u16 server_udp_port) {
     if (spec == "off" || spec == "0") {
         LOG_INFO(Lib_Net, "P2P relay off (SHADPS4_P2P_RELAY)");
     } else {
-        u32 addr = server_addr;
-        u16 port = DefaultRelayPort; // host order
-        if (!spec.empty()) {
-            std::string host = spec;
-            if (const auto colon = spec.rfind(':'); colon != std::string::npos) {
-                host = spec.substr(0, colon);
-                const int value = std::atoi(spec.c_str() + colon + 1);
+        std::vector<P2P::Endpoint> relays;
+        std::string names;
+        const auto add = [&](u32 addr, u16 port) { // port in host order
+            const auto relay = MakeEndpoint(addr, sceNetHtons(port));
+            if (std::ranges::find(relays, relay) != relays.end()) {
+                return;
+            }
+            if (relays.size() == P2P::MaxRelays) {
+                LOG_WARNING(Lib_Net, "P2P relay: more than {} relays, the rest ignored",
+                            P2P::MaxRelays);
+                return;
+            }
+            relays.push_back(relay);
+            const u32 ip = sceNetNtohl(addr);
+            names += fmt::format("{}{}.{}.{}.{}:{}", names.empty() ? "" : ", ", ip >> 24,
+                                 (ip >> 16) & 0xff, (ip >> 8) & 0xff, ip & 0xff, port);
+        };
+        if (spec.empty() && server_addr != 0) {
+            add(server_addr, DefaultRelayPort);
+        }
+        for (size_t start = 0; start < spec.size();) {
+            const size_t end = std::min(spec.find(',', start), spec.size());
+            const std::string entry = spec.substr(start, end - start);
+            start = end + 1;
+            std::string host = entry;
+            u16 port = DefaultRelayPort;
+            if (const auto colon = entry.rfind(':'); colon != std::string::npos) {
+                host = entry.substr(0, colon);
+                const int value = std::atoi(entry.c_str() + colon + 1);
                 port = value > 0 && value <= 0xffff ? static_cast<u16>(value) : DefaultRelayPort;
             }
-            addr = 0;
             addrinfo hints{};
             hints.ai_family = AF_INET;
             hints.ai_socktype = SOCK_DGRAM;
             addrinfo* found = nullptr;
-            if (Host::Initialize() && getaddrinfo(host.c_str(), nullptr, &hints, &found) == 0 &&
-                found != nullptr) {
-                addr = reinterpret_cast<const sockaddr_in*>(found->ai_addr)->sin_addr.s_addr;
+            if (!host.empty() && Host::Initialize() &&
+                getaddrinfo(host.c_str(), nullptr, &hints, &found) == 0 && found != nullptr) {
+                add(reinterpret_cast<const sockaddr_in*>(found->ai_addr)->sin_addr.s_addr, port);
                 freeaddrinfo(found);
             } else {
-                LOG_ERROR(Lib_Net, "P2P relay: cannot resolve '{}', relay off", host);
+                LOG_ERROR(Lib_Net, "P2P relay: cannot resolve '{}', not used", host);
             }
         }
-        if (addr != 0) {
+        if (!relays.empty()) {
             config.emplace();
-            config->relay = MakeEndpoint(addr, sceNetHtons(port));
+            config->relays = std::move(relays);
             if (server_addr != 0 && server_udp_port != 0) {
                 config->direct_only.push_back(MakeEndpoint(server_addr, server_udp_port));
             }
             config->relay_only = only != nullptr && only[0] == '1';
             config->block_direct = block != nullptr && block[0] == '1';
-            const u32 ip = sceNetNtohl(addr);
-            LOG_INFO(Lib_Net, "P2P relay {}.{}.{}.{}:{}: {}", ip >> 24, (ip >> 16) & 0xff,
-                     (ip >> 8) & 0xff, ip & 0xff, port,
+            LOG_INFO(Lib_Net, "P2P relay {}: {}", names,
                      config->relay_only
                          ? "every peer packet goes through it (SHADPS4_P2P_RELAY_ONLY)"
                      : config->block_direct ? "fallback, direct packets from peers dropped "
                                               "(SHADPS4_P2P_BLOCK_DIRECT)"
                                             : "used for peers that do not answer directly");
+        } else if (!spec.empty()) {
+            LOG_ERROR(Lib_Net, "P2P relay off: no usable relay in SHADPS4_P2P_RELAY");
         }
     }
     const auto hooks = GetSystemHooks();

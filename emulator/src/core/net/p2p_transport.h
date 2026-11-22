@@ -5,6 +5,7 @@
 
 #pragma once
 
+#include <array>
 #include <atomic>
 #include <deque>
 #include <functional>
@@ -74,11 +75,14 @@ struct TransportConfig {
     bool verify_stream_checksum = false;
 };
 
-// Fallback route through a UDP relay for peers that cannot be reached directly (symmetric NAT,
+constexpr size_t MaxRelays = 8;
+
+// Fallback route through UDP relays for peers that cannot be reached directly (symmetric NAT,
 // no forwarded port). Layers above the socket never see it: relayed packets are delivered as if
-// they came from the peer's own address.
+// they came from the peer's own address. We register with every relay; each peer is reached
+// through one of them once both sides agree on it.
 struct RelayConfig {
-    Endpoint relay;                    // IPv4
+    std::vector<Endpoint> relays;      // IPv4, at most MaxRelays, the operator's preference first
     std::vector<Endpoint> direct_only; // never relayed, e.g. the signaling server
     bool relay_only = false;           // testing: every peer packet goes through the relay
     bool block_direct = false;         // testing: drop what peers send us directly
@@ -230,24 +234,45 @@ private:
 
     Transport(int family, std::unique_ptr<Codec> codec, const TransportConfig& config);
 
+    struct RelayServer {
+        Endpoint address;
+        Clock::time_point next_register{};
+        Clock::time_point last_register{};
+        Clock::time_point last_forward{}; // a peer packet went through it
+        std::optional<Clock::time_point> unanswered_since; // oldest register without an answer
+        std::optional<Clock::time_point> last_ack;
+        std::optional<Clock::duration> rtt;
+        bool usable = false;   // as last logged
+        bool announced = false; // logged the current registration
+    };
+
+    // Relay sets are bit masks over relays_.
     struct PeerPath {
         std::optional<Clock::time_point> unanswered_since; // sending, nothing direct came back
         std::optional<Clock::time_point> last_direct_rx;
-        std::optional<Clock::time_point> last_relay_rx;
+        std::array<std::optional<Clock::time_point>, MaxRelays> relay_rx;
         Clock::time_point last_probe{};
         Clock::time_point last_used{};
-        bool via_relay = false;
+        std::optional<size_t> relay; // the relay agreed on with the peer
+        u32 route = 0;               // relays in use as last logged, 0 = direct
+        const char* route_reason = nullptr;
     };
 
     void ThreadMain();
     void OnReceive(std::span<const u8> packet, const Endpoint& from, Clock::time_point now);
-    void HandleRelayPacket(std::span<const u8> packet, Clock::time_point now);
+    void HandleRelayPacket(size_t relay, std::span<const u8> packet, Clock::time_point now);
+    std::optional<size_t> RelayIndex(const Endpoint& endpoint) const;
     bool IsRelayablePeer(const Endpoint& endpoint) const;
-    // Picks the route for a packet to a peer. Both can be set while the relay is unconfirmed.
-    void ChooseRoute(const Endpoint& to, Clock::time_point now, bool* direct, bool* relayed);
-    void SetViaRelay(PeerPath& path, const Endpoint& peer, bool via_relay, const char* reason);
+    bool RelayUsable(const RelayServer& relay, Clock::time_point now) const;
+    u32 UsableRelays(Clock::time_point now) const;
+    u32 FastestRelays(u32 candidates, size_t count) const;
+    // Picks the route for a packet to a peer. Direct and relays can both be set while no relay
+    // is confirmed.
+    void ChooseRoute(const Endpoint& to, Clock::time_point now, bool* direct, u32* relays);
+    u32 ChooseRelays(PeerPath& path, const Endpoint& peer, Clock::time_point now, u32 usable);
+    void SetRoute(PeerPath& path, const Endpoint& peer, u32 relays, const char* reason);
     Error SendDirect(std::span<const u8> packet, const Endpoint& to);
-    Error SendViaRelay(std::span<const u8> packet, const Endpoint& to);
+    Error SendViaRelay(std::span<const u8> packet, const Endpoint& to, const Endpoint& relay);
     void RelayTimer(Clock::time_point now);
     void HandlePacket(std::span<const u8> packet, const Endpoint& from, Clock::time_point now);
     void HandleStreamSegment(std::span<const u8> bytes, const Endpoint& from,
@@ -283,11 +308,9 @@ private:
     u64 loss_rng_ = 0x9e3779b97f4a7c15ull;
 
     std::optional<RelayConfig> relay_;
+    std::vector<RelayServer> relays_;
     std::vector<Endpoint> relay_identity_;
     std::map<Endpoint, PeerPath> relay_paths_;
-    Clock::time_point relay_next_register_{};
-    std::optional<Clock::time_point> relay_last_ack_;
-    bool relay_announced_ = false; // logged the current registration
 
     std::thread thread_;
     std::atomic<bool> stop_{false};
