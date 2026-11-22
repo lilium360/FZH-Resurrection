@@ -46,8 +46,8 @@ function Set-ConfigValue($root, [string]$section, [string]$key, $value) {
 $cfg = Get-Content $config -Raw | ConvertFrom-Json
 Set-ConfigValue $cfg 'Input' 'use_special_pad' ([bool]$Aim)
 Set-ConfigValue $cfg 'Input' 'special_pad_class' 9
-# Without a headset the default microphone can be the headset's virtual one, which never opens
-# and stalls the game at start; so no microphone unless asked for.
+# Without a headset the default microphone can be the headset's virtual one, which gives nothing
+# and is slow to open; so no microphone unless asked for.
 Set-ConfigValue $cfg 'Audio' 'sdl_mic_device' $(if (-not $NoMicrophone -and ($VR -or $Microphone)) { 'Default Device' } else { 'None' })
 # Two instances on one PC need different P2P ports.
 Set-ConfigValue $cfg 'General' 'p2p_port' (3657 + [Math]::Max($Instance, 1))
