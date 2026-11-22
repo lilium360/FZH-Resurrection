@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Questions and setup help
+    url: https://github.com/lilium360/FZH-Resurrection/discussions
+    about: For questions, setup help and sharing how it runs on your hardware, use Discussions.
+  - name: Hosting a server or a relay
+    url: https://github.com/lilium360/FZH-Resurrection/blob/main/docs/self-hosting.md
+    about: Instructions for running your own server or volunteering a relay in another region.

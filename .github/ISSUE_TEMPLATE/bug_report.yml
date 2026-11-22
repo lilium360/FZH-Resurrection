@@ -1,0 +1,98 @@
+name: Bug report
+description: Something is broken or behaves incorrectly in the launcher or in the game.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Bug reports only. For questions, setup help or sharing results, use [Discussions](https://github.com/lilium360/FZH-Resurrection/discussions).
+
+        Please search the open issues first to avoid duplicates. The issue and any file you attach are public.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: Describe the problem clearly. Include any error message you saw.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: What should someone do to run into the same problem?
+      placeholder: |
+        1. Open the launcher and sign in
+        2. Start the game
+        3. Join a public match
+        4. ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected to happen
+      description: Leave blank if it is obvious from the description above.
+  - type: textarea
+    id: report-file
+    attributes:
+      label: Problem report file
+      description: In the launcher, open Log or About and press "Report a problem". Keep both boxes ticked (system information and logs). Drag the saved file into the box below.
+      placeholder: The file contains the launcher and emulator versions, your Online ID, settings, system information and logs. It does not contain passwords, tokens or network addresses. Drag the .txt file here.
+    validations:
+      required: true
+  - type: input
+    id: launcher-version
+    attributes:
+      label: Launcher version
+      description: Shown in About (for example 0.2.0). If the launcher does not start, write what you remember.
+      placeholder: 0.2.0
+    validations:
+      required: true
+  - type: dropdown
+    id: server
+    attributes:
+      label: Server
+      description: Which server were you connected to?
+      options:
+        - Community server
+        - A private server
+        - Not signed in or offline
+  - type: input
+    id: headset
+    attributes:
+      label: Headset and how it is connected
+      description: Your VR headset and the link method (cable, wireless, app name).
+      placeholder: Quest 3 over Virtual Desktop
+  - type: dropdown
+    id: controller
+    attributes:
+      label: Controller
+      description: What you were using to play.
+      options:
+        - Aim controller (VR controller)
+        - DualShock 4
+        - Other
+  - type: dropdown
+    id: area
+    attributes:
+      label: Where it happens
+      description: The area of the launcher or game where the problem occurs.
+      options:
+        - Installing or setting up the game
+        - Launcher (account, friends, settings, updates)
+        - Starting the game
+        - Menus and lobby
+        - In a match
+        - Connection with other players
+        - Other
+  - type: checkboxes
+    id: checklist
+    attributes:
+      label: Before you submit
+      options:
+        - label: I searched the open issues and did not find this problem reported.
+          required: true
+        - label: The game is my own dump of CUSA11182 with update 1.43.
+          required: true
+        - label: I understand that this issue and any attached file are public.
+          required: true
