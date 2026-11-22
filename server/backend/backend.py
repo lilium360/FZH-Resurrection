@@ -749,9 +749,11 @@ def build(argv=None):
         os.makedirs(os.path.dirname(path), exist_ok=True)
     auth = AuthStore(config.auth)
     limiter = Limiter()
-    write_log("=== backend started %s on %s:%d, registration %s, game login %s ===" % (
+    started = "=== backend started %s on %s:%d, registration %s, game login %s ===" % (
         time.strftime("%Y-%m-%d %H:%M:%S"), a.host, a.port, "on" if config.shadnet_game else "off",
-        config.game_login))
+        config.game_login)
+    write_log(started)
+    print(started, flush=True)
     return ThreadingHTTPServer((a.host, a.port), Handler)
 
 
