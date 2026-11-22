@@ -43,10 +43,6 @@ export function createTauriBackend(): Backend {
     selectGameFolder: (path, expect) => call("select_game_folder", { path, expect }),
     resetGameFiles: () => call("reset_game_files"),
     prepareGame: () => call("prepare_game"),
-    getGameArt: async (refresh) => {
-      const bytes = await call<ArrayBuffer>("get_game_art", { refresh });
-      return bytes.byteLength ? bytes : null;
-    },
     getInstallPlan: () => call("get_install_plan"),
     setInstallLocation: (path) => call("set_install_location", { path }),
     installGame: () => call("install_game"),

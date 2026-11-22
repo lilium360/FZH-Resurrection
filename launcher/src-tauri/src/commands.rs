@@ -402,55 +402,6 @@ pub async fn prepare_game(app: AppHandle) -> Res<GameFiles> {
     result
 }
 
-// ---------- Game artwork ----------
-
-/// The key art the game ships in `sce_sys`, best first.
-const ART_FILES: [&str; 3] = ["pic1.png", "pic0.png", "icon0.png"];
-const ART_MAX: u64 = 8 << 20;
-const PNG_MAGIC: &[u8] = b"\x89PNG\r\n\x1a\n";
-
-fn art_cache(layout: &crate::layout::Layout) -> PathBuf {
-    layout.data.join("cache").join("game-art.png")
-}
-
-fn read_png(path: &Path) -> Option<Vec<u8>> {
-    let meta = std::fs::metadata(path).ok()?;
-    if !meta.is_file() || meta.len() > ART_MAX {
-        return None;
-    }
-    std::fs::read(path).ok().filter(|b| b.starts_with(PNG_MAGIC))
-}
-
-/// The first of `ART_FILES` found in the base game's or the update's `sce_sys`.
-fn find_art(folders: &[&str]) -> Option<Vec<u8>> {
-    ART_FILES.iter().find_map(|name| folders.iter().find_map(|f| read_png(&Path::new(f).join("sce_sys").join(name))))
-}
-
-/// The selected game's artwork as PNG bytes (empty: none). The path is never chosen by the web
-/// side: it is the game folder in launcher.json. `refresh` false answers from the copy cached in
-/// the data folder (shown at start-up at once); true reads the game again and updates or removes
-/// that copy.
-#[tauri::command]
-pub async fn get_game_art(app: AppHandle, refresh: bool) -> Res<tauri::ipc::Response> {
-    blocking(&app, move |a| {
-        let state = a.state::<AppState>();
-        let layout = &state.layout;
-        let cache = art_cache(layout);
-        if !refresh {
-            return Ok(tauri::ipc::Response::new(read_png(&cache).unwrap_or_default()));
-        }
-        let file = store::load_launcher(&layout.launcher_json());
-        let art = install::effective(layout, &file).and_then(|(b, u)| find_art(&[b.path.as_str(), u.path.as_str()]));
-        match &art {
-            Some(bytes) => store::write_atomic(&cache, bytes)?,
-            None if cache.exists() => std::fs::remove_file(&cache).map_err(|e| BackendError::io_path(cache.display(), e))?,
-            None => {}
-        }
-        Ok(tauri::ipc::Response::new(art.unwrap_or_default()))
-    })
-    .await
-}
-
 // ---------- Installing from PKG files ----------
 
 #[tauri::command]
@@ -1076,30 +1027,4 @@ not_yet! {
 #[tauri::command]
 pub fn get_hosting() -> Res<Value> {
     Ok(json!({ "running": false, "services": { "network": false, "progression": false, "relay": false } }))
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn art_prefers_pic1_then_pic0_then_icon0_and_only_png() {
-        let root = std::env::temp_dir().join(format!("fzh-art-{}", std::process::id()));
-        let (base, update) = (root.join("base"), root.join("update"));
-        for d in [&base, &update] {
-            std::fs::create_dir_all(d.join("sce_sys")).unwrap();
-        }
-        let png = |tag: u8| [PNG_MAGIC, &[tag]].concat();
-        let (b, u) = (base.to_str().unwrap(), update.to_str().unwrap());
-        assert_eq!(find_art(&[b, u]), None);
-        std::fs::write(base.join("sce_sys").join("icon0.png"), png(3)).unwrap();
-        assert_eq!(find_art(&[b, u]), Some(png(3)));
-        std::fs::write(update.join("sce_sys").join("pic0.png"), png(2)).unwrap();
-        assert_eq!(find_art(&[b, u]), Some(png(2)));
-        std::fs::write(base.join("sce_sys").join("pic1.png"), b"not a png").unwrap();
-        assert_eq!(find_art(&[b, u]), Some(png(2)));
-        std::fs::write(update.join("sce_sys").join("pic1.png"), png(1)).unwrap();
-        assert_eq!(find_art(&[b, u]), Some(png(1)));
-        let _ = std::fs::remove_dir_all(&root);
-    }
 }

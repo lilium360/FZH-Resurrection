@@ -1,3 +1,4 @@
+import banner from "../assets/banner.jpg";
 import { CONTROLLER_BUTTONS, type DumpInfo, type Friend, type Msg, type PickKind } from "../backend";
 import { escapeHtml, has, html, number, size, t, th, tr } from "../i18n";
 import { I } from "./icons";
@@ -88,13 +89,9 @@ export const avatar = (o: { id: string; av: AvatarChoice; img: string | null }, 
     ? `<span class="av pic ${cls}" style="background-image:url(${esc(o.img)})"></span>`
     : `<span class="av ${cls} ${AV[typeof o.av === "number" ? o.av : 0] ?? AV[0]}">${esc(ini(o.id))}</span>`;
 
-/** The banner: the game's own key art, or a neutral placeholder; no visible text either way. */
+/** The banner of the Game screen. */
 export const art = (): string =>
-  app.art?.fit
-    ? `<div class="art fit" role="img" aria-label="${th("screen.play.artLabel")}" style="background:${esc(app.art.fit.bg)}"><img src="${esc(app.art.url)}" alt="" style="max-width:min(calc(100% - 18%), ${2 * app.art.fit.w}px);max-height:min(82%, ${2 * app.art.fit.h}px)"></div>`
-    : app.art
-      ? `<div class="art pic" role="img" aria-label="${th("screen.play.artLabel")}" style="background-image:url(${esc(app.art.url)})"></div>`
-      : `<div class="art" role="img" aria-label="${th("screen.play.artLabel")}"><svg viewBox="0 0 372 210" preserveAspectRatio="xMidYMid slice" aria-hidden="true"><g fill="none" stroke="rgba(255,255,255,.07)"><path d="M-10 150L140 60l90 54 160-96"/><path d="M-10 186L140 96l90 54 160-96"/><circle cx="262" cy="70" r="44"/><circle cx="262" cy="70" r="78"/><path d="M0 132h372M186 0v210"/></g><rect x="246" y="54" width="32" height="32" rx="4" fill="rgba(255,255,255,.05)" stroke="rgba(255,255,255,.12)"/></svg></div>`;
+  `<div class="art pic" role="img" aria-label="${th("screen.play.artLabel")}" style="background-image:url(${banner})"></div>`;
 
 export const logLines = (): string =>
   app.log.length

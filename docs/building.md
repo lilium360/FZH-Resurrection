@@ -33,7 +33,7 @@ Checks:
 ```
 npm run typecheck
 npm run check:i18n     # keys used in src/ and src-tauri/src/ exist in copy/en.json and copy/it.json
-npm test               # translator, bundle parity, key-art crop
+npm test               # translator, bundle parity
 cd src-tauri && cargo test --lib
 ```
 

@@ -133,7 +133,7 @@
     "advanced": {
       "title": "Avanzate",
       "subtitle": "Impostazioni del server privato. La maggior parte dei giocatori non ha bisogno di questa pagina.",
-      "officialServer": "Server ufficiale",
+      "officialServer": "Server della community",
       "privateServer": "Server privato",
       "hostLabel": "Ospita su questo PC",
       "hostNote": "Non ancora disponibile.",
@@ -145,7 +145,7 @@
       "networkOnly": "Online · progressi non sincronizzati",
       "offline": "Offline",
       "nothingToSetUp": "Niente da configurare: accedi e gioca.",
-      "cannotReachOfficial": "Il server ufficiale non risponde. Controlla la connessione.",
+      "cannotReachOfficial": "Il server della community non risponde. Controlla la connessione.",
       "privateEnterAddress": "Inserisci l'indirizzo e salva. Il launcher verifica se il server risponde.",
       "privateAskOwner": "{address} — chiedi a chi lo gestisce se resta offline.",
       "hostOnNote": "Gli amici che scelgono questo PC come server privato si collegano qui. Ha effetto subito."
@@ -257,9 +257,9 @@
     "signInFromProfile": "Accedi dal Profilo",
     "srvHosting": "Server privato su questo PC · Attivo",
     "srvPrivate": "Server privato · {address}",
-    "srvOfficialOnline": "Server ufficiale · Online",
-    "srvOfficialPlayers": "Server ufficiale · Online · {count} giocatori",
-    "srvOfficialOffline": "Server ufficiale · Offline",
+    "srvOfficialOnline": "Server della community · Online",
+    "srvOfficialPlayers": "Server della community · Online · {count} giocatori",
+    "srvOfficialOffline": "Server della community · Offline",
     "play": "GIOCA",
     "stop": "STOP"
   },
@@ -286,7 +286,7 @@
     "fpsCounter": { "label": "Contatore FPS", "note": "Fotogrammi al secondo, mostrato nella finestra di gioco." },
     "modFreeTurn": { "label": "Disattiva l'avviso FACE CAMERA", "note": "Toglie la scritta FACE CAMERA con le frecce, che copre la visuale quando ti giri di spalle. Vale dal prossimo avvio del gioco." },
     "frameStats": { "label": "Diagnostica fotogrammi", "note": "Registra i tempi dei fotogrammi per la diagnosi." },
-    "usePrivateServer": { "label": "Usa un server privato", "note": "Se spento, giochi sul server ufficiale." },
+    "usePrivateServer": { "label": "Usa un server privato", "note": "Se spento, giochi sul server della community." },
     "privateServer": { "label": "Indirizzo del server", "note": "Incolla l'indirizzo così come te l'ha dato chi gestisce il server." }
   },
 
@@ -325,7 +325,7 @@
     ["Server di rete (shadNet)", "GPL-2.0-or-later"]
   ],
 
-  "server": { "official": "server ufficiale", "private": "server privato {address}" },
+  "server": { "official": "server della community", "private": "server privato {address}" },
 
   "check": {
     "title": "Prova dei tasti · ultima sessione",
@@ -528,7 +528,7 @@
     "changeServer": {
       "title": "Cambiare server?",
       "bodyPrivate": "Verrai disconnesso. Account e amici sono separati per ogni server: accedi di nuovo su {address}.",
-      "bodyOfficial": "Verrai disconnesso. Account e amici sono separati per ogni server: accedi di nuovo sul server ufficiale.",
+      "bodyOfficial": "Verrai disconnesso. Account e amici sono separati per ogni server: accedi di nuovo sul server della community.",
       "confirm": "Cambia server"
     },
     "stopHosting": {
@@ -713,7 +713,7 @@
     "warmup_no_script": "Manca un file necessario. Reinstalla il launcher.",
     "warmup_not_signed_in": "Accedi prima — il preriscaldamento gioca online.",
     "net_closed": "Connessione al server persa.",
-    "net_official_unreachable": "Il server ufficiale non risponde. Controlla la connessione.",
+    "net_official_unreachable": "Il server della community non risponde. Controlla la connessione.",
     "net_private_unreachable": "{host} (porta {port}) non risponde. Controlla l'indirizzo e la connessione.",
     "net_official_protocol": "Il server ha dato una risposta inaspettata. Riprova più tardi.",
     "net_private_protocol": "Il server {host} ha dato una risposta inaspettata ({detail}).",

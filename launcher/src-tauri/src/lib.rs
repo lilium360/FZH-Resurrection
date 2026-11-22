@@ -144,7 +144,6 @@ pub fn run() {
             commands::select_game_folder,
             commands::reset_game_files,
             commands::prepare_game,
-            commands::get_game_art,
             commands::get_install_plan,
             commands::set_install_location,
             commands::install_game,

@@ -133,7 +133,7 @@
     "advanced": {
       "title": "Advanced",
       "subtitle": "Private server settings. Most players do not need this page.",
-      "officialServer": "Official server",
+      "officialServer": "Community server",
       "privateServer": "Private server",
       "hostLabel": "Host on this PC",
       "hostNote": "Not available yet.",
@@ -145,7 +145,7 @@
       "networkOnly": "Online · progress not syncing",
       "offline": "Offline",
       "nothingToSetUp": "Nothing to set up: sign in and play.",
-      "cannotReachOfficial": "Cannot reach the official server. Check your connection.",
+      "cannotReachOfficial": "Cannot reach the community server. Check your connection.",
       "privateEnterAddress": "Type the address and save. The launcher checks whether the server responds.",
       "privateAskOwner": "{address} — ask the owner if it stays offline.",
       "hostOnNote": "Friends who choose this PC as their private server connect here. Takes effect at once."
@@ -257,9 +257,9 @@
     "signInFromProfile": "Sign in from Profile",
     "srvHosting": "Private server on this PC · Hosting",
     "srvPrivate": "Private server · {address}",
-    "srvOfficialOnline": "Official server · Online",
-    "srvOfficialPlayers": "Official server · Online · {count} players",
-    "srvOfficialOffline": "Official server · Offline",
+    "srvOfficialOnline": "Community server · Online",
+    "srvOfficialPlayers": "Community server · Online · {count} players",
+    "srvOfficialOffline": "Community server · Offline",
     "play": "PLAY",
     "stop": "STOP"
   },
@@ -286,7 +286,7 @@
     "fpsCounter": { "label": "FPS counter", "note": "Frames per second, shown in the game window." },
     "modFreeTurn": { "label": "Disable the FACE CAMERA warning", "note": "Removes the FACE CAMERA text and arrows that cover the view when you turn your back. Applies the next time the game starts." },
     "frameStats": { "label": "Frame diagnostics", "note": "Logs frame timing for troubleshooting." },
-    "usePrivateServer": { "label": "Use a private server", "note": "Off: you play on the official server." },
+    "usePrivateServer": { "label": "Use a private server", "note": "Off: you play on the community server." },
     "privateServer": { "label": "Server address", "note": "Paste the address exactly as the owner gave it to you." }
   },
 
@@ -325,7 +325,7 @@
     ["Network server (shadNet)", "GPL-2.0-or-later"]
   ],
 
-  "server": { "official": "official server", "private": "private server {address}" },
+  "server": { "official": "community server", "private": "private server {address}" },
 
   "check": {
     "title": "Button check · last session",
@@ -528,7 +528,7 @@
     "changeServer": {
       "title": "Change server?",
       "bodyPrivate": "You will be signed out. Accounts and friends are separate on each server: sign in again on {address}.",
-      "bodyOfficial": "You will be signed out. Accounts and friends are separate on each server: sign in again on the official server.",
+      "bodyOfficial": "You will be signed out. Accounts and friends are separate on each server: sign in again on the community server.",
       "confirm": "Change server"
     },
     "stopHosting": {
@@ -713,7 +713,7 @@
     "warmup_no_script": "A required file is missing. Reinstall the launcher.",
     "warmup_not_signed_in": "Sign in first — the warm-up plays online.",
     "net_closed": "Lost connection to the server.",
-    "net_official_unreachable": "Cannot reach the official server. Check your connection.",
+    "net_official_unreachable": "Cannot reach the community server. Check your connection.",
     "net_private_unreachable": "Cannot reach {host} (port {port}). Check the address and your connection.",
     "net_official_protocol": "The server gave an unexpected response. Try again later.",
     "net_private_protocol": "The server at {host} gave an unexpected response ({detail}).",

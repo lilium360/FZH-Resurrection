@@ -1,7 +1,14 @@
 import { AVATAR_MAX_BYTES, AVATAR_SIDE } from "../backend";
-import { load } from "./art";
 import { AV, ini } from "./components";
 import type { AvatarChoice } from "./state";
+
+const load = (url: string): Promise<HTMLImageElement> =>
+  new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => resolve(img);
+    img.onerror = reject;
+    img.src = url;
+  });
 
 function canvas(): [HTMLCanvasElement, CanvasRenderingContext2D] {
   const c = document.createElement("canvas");

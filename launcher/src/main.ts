@@ -12,11 +12,10 @@ import { loadBackend, type Backend } from "./backend";
 import type { MockHooks } from "./backend.mock";
 import { setLang, t } from "./i18n";
 import { checkUpdate, loadPlan, prepare, showInvite, syncAvatar } from "./ui/actions";
-import { prepareArt } from "./ui/art";
 import { esc, updateProgress } from "./ui/components";
 import { bindEvents, initialScreen } from "./ui/events";
 import { initTips } from "./ui/tips";
-import { ask, cancelAction, refresh, render, renderLog, setArtWatcher, setWizardRenderer, toast } from "./ui/overlay";
+import { ask, cancelAction, refresh, render, renderLog, setWizardRenderer, toast } from "./ui/overlay";
 import { CACHE, CHECK, DP, F, PR, S, SAVED, UPD, app, applyFiles, applySession, log, logMsg, needsInstall, setBackend } from "./ui/state";
 import { wizard } from "./ui/wizard";
 
@@ -84,24 +83,11 @@ async function subscribe(backend: Backend): Promise<void> {
   ]);
 }
 
-let booted = false;
-
-/** The game's key art as an object URL; `refresh` false shows the cached copy at once. */
-async function loadArt(backend: Backend, refresh: boolean): Promise<void> {
-  const bytes = await backend.getGameArt(refresh).catch(() => null);
-  const view = bytes ? await prepareArt(bytes) : null;
-  if (app.art) URL.revokeObjectURL(app.art.url);
-  app.art = view;
-  if (booted) render();
-}
-
 async function boot(): Promise<void> {
   const deepLink = location.hash.length > 1;
   const h = initialScreen();
   const backend = await loadBackend(mockHooks);
   setBackend(backend);
-  const cachedArt = loadArt(backend, false);
-  setArtWatcher(() => void loadArt(backend, true));
   setWizardRenderer(wizard);
   bindEvents();
   await subscribe(backend);
@@ -140,10 +126,8 @@ async function boot(): Promise<void> {
 
   if (h) app.scr = h;
   if (deepLink || launcher.setupCompleted) app.wz = null;
-  booted = true;
   render();
   wizard();
-  void cachedArt.then(() => loadArt(backend, true));
   if (F.base && F.update && needsInstall()) void loadPlan();
   else if (F.base && F.update && F.prep === 0 && !app.run && CACHE.status !== "warming") void prepare();
 

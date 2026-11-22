@@ -60,7 +60,7 @@ const newCode = (): string => {
 const ONLINE_ID = /^[A-Za-z0-9_-]{3,16}$/;
 const badOnlineId = () => err("invalid_input", "backend.online_id_format", "Online ID: 3 to 16 letters, digits, - and _.");
 const unreachableAccounts = () =>
-  err("server_unreachable", "backend.account_unreachable", "Cannot reach the account service of the official server.", { server: msg("server.official", "official server") });
+  err("server_unreachable", "backend.account_unreachable", "Cannot reach the account service of the community server.", { server: msg("server.official", "community server") });
 
 const info = (path: string, version: string, source: "folder" | "pkg" = "folder"): DumpInfo => ({ path, titleId: "CUSA11182", region: "Europe", version, source });
 const MERGED = "D:\\Games\\Firewall Zero Hour\\CUSA11182";
@@ -193,7 +193,7 @@ export function createMockBackend(hooks: MockHooks): Backend {
     emit("game-state", { running: true, exitCode: null });
     const server = settings.usePrivateServer
       ? msg("server.private", `private server ${settings.privateServer}`, { address: settings.privateServer })
-      : msg("server.official", "official server");
+      : msg("server.official", "community server");
     const density = settings.pixelDensity === "default" ? "1.0" : settings.pixelDensity;
     const lines: [string, string, Params][] = [
       ["log.event.playingOn", `Launcher: playing on the ${server.message}`, { server }],
@@ -356,9 +356,6 @@ export function createMockBackend(hooks: MockHooks): Backend {
       log("log.event.gameReady", "Preparing: game ready");
       return snapshot();
     },
-    async getGameArt() {
-      return null;
-    },
     async getInstallPlan() {
       await wait(300);
       return plan();
@@ -497,11 +494,11 @@ export function createMockBackend(hooks: MockHooks): Backend {
       if (lower.startsWith("taken") || accounts.has(lower)) throw err("already_exists", "backend.register_id_taken", "That Online ID is taken.");
       const recoveryCode = newCode();
       accounts.set(lower, { onlineId: id, code: canonicalCode(recoveryCode)! });
-      log("log.event.accountCreated", `Network: account ${id} created on the official server`, { id, server: msg("server.official", "official server") });
+      log("log.event.accountCreated", `Network: account ${id} created on the community server`, { id, server: msg("server.official", "community server") });
       profile = { ...profile, onlineId: id };
       session = { ...profile };
       if (lower.startsWith("nosign")) {
-        const problem = msg("backend.net_official_unreachable", "Cannot reach the official server. Check your connection and try again.");
+        const problem = msg("backend.net_official_unreachable", "Cannot reach the community server. Check your connection and try again.");
         return { recoveryCode, session: { ...session }, problem };
       }
       scheduleInvite();

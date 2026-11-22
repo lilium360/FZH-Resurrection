@@ -133,8 +133,8 @@ mod tests {
 
     #[test]
     fn nested_messages_keep_their_key() {
-        let inner = Msg::new("server.official", "the official server");
-        let m = Msg::new("log.event.playingOn", "Playing on the official server").with("server", inner);
+        let inner = Msg::new("server.official", "the community server");
+        let m = Msg::new("log.event.playingOn", "Playing on the community server").with("server", inner);
         let v = serde_json::to_value(&m).unwrap();
         assert_eq!(v["params"]["server"]["key"], "server.official");
     }

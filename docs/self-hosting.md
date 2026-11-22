@@ -89,7 +89,7 @@ registers with all of them and two players agree on one relay both registered wi
 the shorter round trip. A relay that stops answering is dropped within a few seconds and new
 connections use another, but a match that was running through it has been lost in tests.
 
-For the official server the address, relays included, is the build-time `FZH_DEFAULT_SERVER` of
+For the community server the address, relays included, is the build-time `FZH_DEFAULT_SERVER` of
 the launcher ([building.md](building.md#release-build)): a new relay reaches players with the next
 launcher release.
 

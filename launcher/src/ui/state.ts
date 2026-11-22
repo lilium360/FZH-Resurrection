@@ -20,7 +20,6 @@ import {
   type UpdateProgress,
 } from "../backend";
 import { t } from "../i18n";
-import type { ArtView } from "./art";
 import type { ScreenId } from "./meta";
 
 export let backend: Backend;
@@ -62,8 +61,6 @@ export const app = {
   friends: { friends: [], incoming: [], outgoing: [] } as FriendsState,
   /** Who invited the player to a match since the game last started, newest first. */
   invites: [] as string[],
-  /** The game's key art, or null for the neutral placeholder. */
-  art: null as ArtView | null,
 };
 
 /** Game files. prep: 0 not prepared, 1 preparing, 2 ready. err/found: the last rejected folder; note: a rejected counterpart; prepErr: the last preparation error. */
@@ -135,12 +132,9 @@ export const dirtyS = (): boolean => (Object.keys(S) as (keyof Settings)[]).some
 export const dirtyP = (): boolean => PR.in && (DP.id !== PR.id || DP.av !== PR.av || DP.img !== PR.img);
 export const dirty = (): boolean => dirtyS() || dirtyP();
 
-/** The `{server}` parameter: "official server" or "private server <address>", without the article. */
+/** The `{server}` parameter: "community server" or "private server <address>", without the article. */
 export const srvName = (): Msg =>
   SAVED.usePrivateServer ? { key: "server.private", params: { address: SAVED.privateServer } } : { key: "server.official" };
-
-/** Changes when the game whose artwork is shown changes (folder, installation, removal). */
-export const artKey = (): string => [F.base?.path, F.update?.path, F.inst?.target, F.inst?.complete].join("|");
 
 export const canPlay = (): boolean => F.prep === 2 && PR.in && CACHE.status !== "warming" && !installing();
 

@@ -19,7 +19,7 @@ pub fn valid_online_id(s: &str) -> bool {
     (3..=16).contains(&s.len()) && s.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-')
 }
 
-/// The default server is only ever "the official server": its address is not shown to the player.
+/// The default server is only ever "the community server": its address is not shown to the player.
 pub fn net_error(host: &str, e: &NetError) -> BackendError {
     let official = host == default_server();
     let at = Server::of(host);
@@ -27,7 +27,7 @@ pub fn net_error(host: &str, e: &NetError) -> BackendError {
     match e {
         NetError::Closed => err("backend.net_closed", "The connection to the server was lost. Try again in a moment.".into()),
         NetError::Unreachable(_) | NetError::Timeout if official => {
-            err("backend.net_official_unreachable", "Cannot reach the official server. Check your connection and try again.".into())
+            err("backend.net_official_unreachable", "Cannot reach the community server. Check your connection and try again.".into())
         }
         NetError::Unreachable(_) | NetError::Timeout => err(
             "backend.net_private_unreachable",
@@ -36,7 +36,7 @@ pub fn net_error(host: &str, e: &NetError) -> BackendError {
         .with("host", at.host.as_str())
         .with("port", at.game),
         NetError::Protocol(_) if official => {
-            err("backend.net_official_protocol", "The official server did not answer as expected. Try again later.".into())
+            err("backend.net_official_protocol", "The community server did not answer as expected. Try again later.".into())
         }
         NetError::Protocol(m) => err("backend.net_private_protocol", format!("The private server {host} did not answer as a shadNet server ({m})."))
             .with("host", host)
@@ -181,7 +181,7 @@ mod tests {
         assert_eq!(net_error("10.0.0.1", &NetError::Timeout).code, "server_unreachable");
         assert!(net_error("10.0.0.1", &NetError::Timeout).message.contains("private server 10.0.0.1"));
         let official = net_error(default_server(), &NetError::Timeout).message;
-        assert_eq!(official, "Cannot reach the official server. Check your connection and try again.");
+        assert_eq!(official, "Cannot reach the community server. Check your connection and try again.");
         assert!(!net_error(default_server(), &NetError::Protocol("x".into())).message.contains(default_server()));
     }
 

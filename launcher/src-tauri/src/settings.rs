@@ -13,10 +13,10 @@ pub fn default_server() -> &'static str {
     }
 }
 
-/// "official server" for the build-time default, else "private server <address>".
+/// "community server" for the build-time default, else "private server <address>".
 pub fn server_name(host: &str) -> Msg {
     if host == default_server() {
-        Msg::new("server.official", "official server")
+        Msg::new("server.official", "community server")
     } else {
         Msg::new("server.private", format!("private server {host}")).with("address", host)
     }
@@ -516,7 +516,7 @@ mod tests {
     #[test]
     fn server_names_hide_the_default_address() {
         let official = server_name(default_server());
-        assert_eq!((official.key, official.message.as_str()), ("server.official", "official server"));
+        assert_eq!((official.key, official.message.as_str()), ("server.official", "community server"));
         assert!(official.params.is_empty());
         let private = server_name("10.1.2.3");
         assert_eq!((private.key, private.params["address"].as_str()), ("server.private", Some("10.1.2.3")));

@@ -396,8 +396,6 @@ export interface Backend {
   selectGameFolder(path: string, expect: DumpKind | null): Promise<FolderCheck>;
   resetGameFiles(): Promise<GameFiles>;
   prepareGame(): Promise<GameFiles>;
-  /** The selected game's key art (sce_sys pic1, pic0 or icon0) as PNG bytes, null when there is none. `refresh` false: the copy cached at the last refresh, at once. */
-  getGameArt(refresh: boolean): Promise<ArrayBuffer | null>;
   /** What installing the chosen PKG files needs at the current install location. */
   getInstallPlan(): Promise<InstallPlan>;
   setInstallLocation(path: string): Promise<InstallPlan>;

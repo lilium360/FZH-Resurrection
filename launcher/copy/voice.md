@@ -31,7 +31,7 @@ Technical internals stay out of player-facing text:
 
 ## The server
 
-The default server is called **the official server** in English, **il server ufficiale** in Italian.
+The default server is called **the community server** in English, **il server della community** in Italian.
 A private server is named with the address the player typed ("private server 203.0.113.5").
 Never say where or how any server is hosted.
 
@@ -55,7 +55,7 @@ Never say where or how any server is hosted.
 | shader | shader | Loanword |
 | emulator | emulatore | shadPS4 fork |
 | headset | visore | VR headset |
-| official server | server ufficiale | The default online server |
+| community server | server della community | The default online server |
 | private server | server privato | A player-hosted server |
 | Online ID | Online ID | shadNet username; never translate |
 | recovery code | codice di recupero | Shown once at registration; signs the account in on another PC |

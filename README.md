@@ -37,12 +37,12 @@ relay in another region, please reach out through this repository's
 [Issues](https://github.com/lilium360/FZH-Resurrection/issues) or
 [Discussions](https://github.com/lilium360/FZH-Resurrection/discussions).
 
-A relay only carries traffic when two players cannot connect directly, but when it does the
+A relay only carries traffic when players cannot connect directly, but when it does the
 relay's distance from the players becomes their latency, so a relay on another continent adds lag.
 Running one is lightweight: a single Python script (`server/relay/relay.py`, standard library
 only), one inbound UDP port (31316 by default), a few megabytes of memory and nothing stored on
 disk. A server address can list up to 8 relays; the emulator registers with all of them and
-players use the one with the shortest round trip. For the official server the relay list is built
+players use the one with the shortest round trip. For the community server the relay list is built
 into the launcher, so a new relay reaches everyone with the next release.
 Details in [docs/self-hosting.md](docs/self-hosting.md#hosting-only-a-relay).
 
@@ -85,7 +85,7 @@ training matches in a window on the monitor, taking 12 to 46 minutes.
 - **Friends.** Add friends and accept or decline requests in the launcher, by Online ID.
 - **Matches.** Public matchmaking and private lobbies run on the server. Invitations to a private
   lobby are sent from the game to friends and answered inside the headset.
-- **Connections.** Matches run directly between players. When two players cannot reach each other,
+- **Connections.** Matches run directly between players. When players cannot reach each other,
   their traffic goes through a relay on the server.
 
 Accounts belong to the server they were created on. To play on a different server, turn on

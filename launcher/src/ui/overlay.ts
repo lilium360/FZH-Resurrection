@@ -2,7 +2,7 @@ import { setLang, th } from "../i18n";
 import { esc, logLines } from "./components";
 import { I } from "./icons";
 import { shell } from "./shell";
-import { REC, S, app, artKey, dirty } from "./state";
+import { REC, S, app, dirty } from "./state";
 
 const byId = (id: string): HTMLElement => {
   const el = document.getElementById(id);
@@ -24,18 +24,9 @@ export function setWizardRenderer(fn: () => void): void {
   wizardRenderer = fn;
 }
 
-let artWatcher: () => void = () => {};
-let lastArt: string | null = null;
-export function setArtWatcher(fn: () => void): void {
-  artWatcher = fn;
-}
-
 /** Redraws the screen in the launcher language being edited, so a change shows at once. */
 export function render(): void {
   setLang(S.launcherLanguage);
-  const key = artKey();
-  if (lastArt !== null && key !== lastArt) artWatcher();
-  lastArt = key;
   root.className = "p pb";
   root.innerHTML = shell();
   toastsEl.style.bottom = dirty() ? "96px" : "";

@@ -75,9 +75,7 @@ code,.code{font-family:var(--mono);font-size:11.5px;color:var(--t2)}
   radial-gradient(120% 90% at 85% 10%,rgba(var(--acc-a),.13),transparent 55%),
   linear-gradient(160deg,#1b1b20,#0e0e11 60%)}
 .art svg{position:absolute;inset:0;width:100%;height:100%}
-.art.pic{background-size:cover;background-position:center;background-repeat:no-repeat}
-.art.fit{display:flex;align-items:center;justify-content:center}
-.art.fit img{display:block;width:auto;height:auto;object-fit:contain}
+.art.pic{background-size:cover;background-position:50% 58%;background-repeat:no-repeat}
 .art p{position:absolute;left:14px;bottom:11px;right:14px;margin:0;font-size:11.5px;color:var(--t2);line-height:1.35}
 .art p b{display:block;color:var(--tx);font-weight:600;font-size:12px}
 .wc{display:flex;gap:2px;color:var(--t3)} .wc span{width:30px;height:24px;display:grid;place-items:center;border-radius:6px}
