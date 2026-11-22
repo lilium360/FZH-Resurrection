@@ -1,0 +1,48 @@
+# Build outputs
+node_modules/
+dist/
+target/
+/launcher/src-tauri/gen/
+/launcher/src-tauri/bundle/
+/emulator/build/
+__pycache__/
+*.pyc
+
+# Local data, logs, test runs
+/test-runs/
+*.log
+backend-data.json
+avatars/
+/server/docker/.env
+/server/bare/config.env
+.env
+*.env
+!*.env.example
+!.env.example
+
+# Secrets and accounts
+registration-key.txt
+shadnet.cfg
+users.json
+*.key
+*.pem
+
+# Game files: never commit them
+*.pkg
+*.pak
+!/launcher/src-tauri/tests/fixtures/*.pak
+eboot.bin
+param.sfo
+CUSA*/
+*.png.part
+*.part
+*.part.len
+
+# Editors and OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# backend account store
+backend-auth.json

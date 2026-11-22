@@ -1,0 +1,12 @@
+* text=auto
+*.sh text eol=lf
+Dockerfile text eol=lf
+*.yml text eol=lf
+*.env.example text eol=lf
+.env.example text eol=lf
+*.cfg.example text eol=lf
+*.ps1 text eol=crlf
+/launcher/src-tauri/tests/fixtures/** -text
+*.png binary
+*.ico binary
+*.pak binary
