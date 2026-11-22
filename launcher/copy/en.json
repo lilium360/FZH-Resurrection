@@ -316,13 +316,17 @@
   "file": { "game": "Game folder", "base": "Base game", "update": "Update 1.43", "install": "Install location" },
 
   "licence": [
-    ["shadPS4 (our fork, commit {commit})", "GPL-2.0-or-later"],
+    ["shadPS4 (github.com/shadps4-emu/shadPS4)", "GPL-2.0-or-later"],
     ["Farpoint PC VR fork of shadPS4 (github.com/evertec82/Farpoint)", "GPL-2.0-or-later"],
+    ["Our fork of shadPS4, commit {commit} (github.com/lilium360/FZH-Resurrection)", "GPL-2.0-or-later"],
+    ["shadNet (github.com/shadps4-emu/shadNet)", "GPL-2.0-or-later"],
+    ["Tauri", "MIT OR Apache-2.0"],
     ["Dear ImGui", "MIT"],
     ["SDL3", "zlib"],
     ["OpenXR loader", "Apache-2.0"],
-    ["Microsoft Visual C++ runtime", "Microsoft redistributable"],
-    ["Network server (shadNet)", "GPL-2.0-or-later"]
+    ["Barlow font", "SIL Open Font License 1.1"],
+    ["Lekton font", "SIL Open Font License 1.1"],
+    ["Microsoft Visual C++ runtime", "Microsoft redistributable"]
   ],
 
   "server": { "official": "community server", "private": "private server {address}" },
