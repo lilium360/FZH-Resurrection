@@ -48,7 +48,7 @@
   },
   "plugins": {
     "updater": {
-      "pubkey": "UPDATER-PUBLIC-KEY-NOT-SET",
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDQ5N0I2OEYwMDdGN0JEMjUKUldRbHZmY0g4R2g3U2Uxejh0bzdmTy9jeUcrM3hONVhERnNzRVNPQTdnZko1b1NDRVdjY0xGQjAK",
       "endpoints": ["https://github.com/lilium360/FZH-Resurrection/releases/latest/download/latest.json"],
       "requireSignedVersion": true,
       "windows": { "installMode": "passive" }
