@@ -279,7 +279,7 @@ Milestones (emulator log text -> `log` line; each once per run except the cache 
 | `Run: Starting shadps4 emulator` | "Emulator: started" |
 | `WarmUp: Preloaded N pipelines` | "Shader cache: N pipelines loaded" |
 | `Session with the headset made` | "OpenXR: session opened" |
-| `has no headset connected yet` | "OpenXR: no headset connected yet, the game starts in the window" |
+| `Connect: <runtime> has no headset connected yet` | `log.event.headsetWaiting {runtime}`: "OpenXR: <runtime> has no headset connected, the game starts in the window...", and the UI shows the toast `toast.headsetWaiting {runtime}` (a headset that runs through another program never shows up in this runtime) |
 | `No OpenXR runtime that could show frames` | "OpenXR: no headset runtime, the game is shown in the window" |
 | `HandleLoginReply: Logged in npid='X'` | "Network: X signed in" |
 | `ProbeServer: probe: server S` ... `unreachable` | "Network: the server is unreachable, playing offline" (no address; the "is reachable" line is not matched) |

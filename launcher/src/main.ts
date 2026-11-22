@@ -40,6 +40,7 @@ async function subscribe(backend: Backend): Promise<void> {
   await Promise.all([
     backend.on("log", (l) => {
       log({ key: l.key, params: l.params, message: l.line }, l.time);
+      if (l.key === "log.event.headsetWaiting") toast(t("toast.headsetWaiting", l.params), true);
       renderLog();
     }),
     backend.on("game-state", (s) => {

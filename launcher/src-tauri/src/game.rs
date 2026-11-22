@@ -1,5 +1,6 @@
 //! Starting, watching and stopping the emulator.
 
+use crate::error::Msg;
 use std::collections::HashSet;
 use std::ffi::OsString;
 use std::io::{Read, Seek, SeekFrom};
@@ -190,7 +191,19 @@ fn between<'a>(line: &'a str, start: &str, end: char) -> Option<&'a str> {
 }
 
 /// Translates an emulator log line into a friendly milestone. The key makes one-off milestones appear once.
-pub fn milestone(line: &str) -> Option<(&'static str, String)> {
+pub fn milestone(line: &str) -> Option<(&'static str, Msg)> {
+    let (key, text) = match between(line, "Connect: ", '\n').and_then(|rest| rest.split_once(" has no headset connected yet")) {
+        // The runtime is named: a headset that runs through another program never shows up in this one.
+        Some((runtime, _)) => {
+            let english = format!("OpenXR: {runtime} has no headset connected. The game starts in a window. If your headset runs through a different program, set that one as the active OpenXR runtime and start the game again.");
+            return Some(("xr-wait", Msg::new("log.event.headsetWaiting", english).with("runtime", runtime)));
+        }
+        None => plain_milestone(line)?,
+    };
+    Some((key, Msg::raw(text)))
+}
+
+fn plain_milestone(line: &str) -> Option<(&'static str, String)> {
     if line.contains("Run: Starting shadps4 emulator") {
         return Some(("start", "Emulator: started".into()));
     }
@@ -202,9 +215,6 @@ pub fn milestone(line: &str) -> Option<(&'static str, String)> {
     }
     if line.contains("No OpenXR runtime that could show frames") {
         return Some(("xr", "OpenXR: no headset runtime, the game is shown in the window".into()));
-    }
-    if line.contains("has no headset connected yet") {
-        return Some(("xr-wait", "OpenXR: no headset connected yet, the game starts in the window".into()));
     }
     if line.contains("ProbeServer: probe: server ") && line.contains("unreachable") {
         return Some(("netfail", "Network: the server is unreachable, playing offline".into()));
@@ -243,7 +253,7 @@ impl LogTail {
         LogTail { path, offset: 0, partial: Vec::new(), seen: HashSet::new() }
     }
 
-    pub fn poll(&mut self) -> Vec<String> {
+    pub fn poll(&mut self) -> Vec<Msg> {
         let mut out = Vec::new();
         let Ok(mut f) = std::fs::File::open(&self.path) else { return out };
         let len = f.metadata().map(|m| m.len()).unwrap_or(0);
@@ -281,17 +291,19 @@ mod tests {
     #[test]
     fn milestones_from_real_lines() {
         let l = "[ShadNet] <Info> (ShadNet:Reader) client.cpp:720 HandleLoginReply: Logged in npid='Player_1' userId=1 friends=0";
-        assert_eq!(milestone(l), Some(("login", "Network: Player_1 signed in".into())));
+        assert_eq!(milestone(l), Some(("login", Msg::raw("Network: Player_1 signed in"))));
         let l = "[Render] <Info> (shadPS4:Main) vk_pipeline_serialization.cpp:416 WarmUp: Preloaded 1548 pipelines";
-        assert_eq!(milestone(l).unwrap().1, "Shader cache: 1548 pipelines loaded");
+        assert_eq!(milestone(l).unwrap().1.message, "Shader cache: 1548 pipelines loaded");
         let l = "[Loader] <Info> (shadPS4:Main) emulator.cpp:330 Run: Starting shadps4 emulator v0.16.1 WIP ";
-        assert_eq!(milestone(l).unwrap().1, "Emulator: started");
+        assert_eq!(milestone(l).unwrap().1.message, "Emulator: started");
         let l = "[ShadNet] <Warning> (shadPS4:Main) server_probe.cpp:109 ProbeServer: probe: server 127.0.0.1:31313 is unreachable (timeout 3000 ms)";
-        assert_eq!(milestone(l).unwrap().1, "Network: the server is unreachable, playing offline");
+        assert_eq!(milestone(l).unwrap().1.message, "Network: the server is unreachable, playing offline");
         let l = "[ShadNet] <Info> (shadPS4:Main) server_probe.cpp:181 ProbeServer: probe: server 127.0.0.1:31313 is reachable (protocol v1)";
         assert!(milestone(l).is_none());
         let l = "[Core.Vr] <Info> (shadPS4:Main) openxr_host.cpp:2768 Connect: VirtualDesktopXR 1.1.0 has no headset connected yet. The game starts";
-        assert_eq!(milestone(l).unwrap().0, "xr-wait");
+        let (key, m) = milestone(l).unwrap();
+        assert_eq!((key, m.key, m.params["runtime"].as_str()), ("xr-wait", "log.event.headsetWaiting", Some("VirtualDesktopXR 1.1.0")));
+        assert!(m.message.starts_with("OpenXR: VirtualDesktopXR 1.1.0 has no headset connected"));
         assert!(milestone("[Core] <Info> nothing to see").is_none());
     }
 
@@ -327,10 +339,10 @@ mod tests {
         f.write_all(b"x Run: Starting shadps4 emulator v1\nx Session with the head").unwrap();
         f.flush().unwrap();
         let mut t = LogTail::new(path.clone());
-        assert_eq!(t.poll(), vec!["Emulator: started"]);
+        assert_eq!(t.poll(), vec![Msg::raw("Emulator: started")]);
         f.write_all(b"set made\nx Run: Starting shadps4 emulator v1\n").unwrap();
         f.flush().unwrap();
-        assert_eq!(t.poll(), vec!["OpenXR: session opened"]);
+        assert_eq!(t.poll(), vec![Msg::raw("OpenXR: session opened")]);
         drop(f);
         std::fs::write(&path, b"y\n").unwrap();
         assert!(t.poll().is_empty());
