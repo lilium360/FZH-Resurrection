@@ -51,7 +51,7 @@ try {
     if ($typed) { Remove-Item Env:TAURI_SIGNING_PRIVATE_KEY_PASSWORD }
 }
 
-$commit = Get-Content (Join-Path $launcher 'src-tauri\bundle\commit.txt') -Raw
+$commit = Get-Content (Join-Path $launcher 'src-tauri\bundle\emulator\commit.txt') -Raw
 if ($commit -match 'dirty') { throw "The bundled emulator comes from a modified tree: $($commit.Trim())" }
 
 $out = Join-Path $launcher 'src-tauri\target\release\bundle\nsis'

@@ -23,6 +23,21 @@ npm run tauri signer generate -- -w %USERPROFILE%\.tauri\fzh-resurrection.key
   builds and runs, but updates are off: About shows no update controls and each start logs
   "Updates are off: this build has no update key."
 
+## The release script
+
+`tools\release.ps1` does the steps of "Building a release" from 3 on, "latest.json" and, with
+`-Publish`, "Publishing". It refuses to run without the update key in `tauri.conf.json`, with
+uncommitted changes, with different versions in the three files, or when the tag exists.
+
+```
+$env:TAURI_SIGNING_PRIVATE_KEY = "$env:USERPROFILE\.tauri\fzh-resurrection.key"
+powershell -ExecutionPolicy Bypass -File tools\release.ps1 -Server <public server address> -Notes "First public release" -Publish
+```
+
+It asks for the key's password, which stays out of the command history. Without `-Publish` it
+stops after writing the installer, its `.sig` and `latest.json` in
+`launcher/src-tauri/target/release/bundle/nsis/`.
+
 ## Building a release
 
 1. Build the emulator (`emulator/`) in Release; `shadps4.exe` must come from a clean tree, so the
