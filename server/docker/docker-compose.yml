@@ -18,7 +18,7 @@ x-python: &python
   context: ..
   dockerfile_inline: |
     FROM python:3.13-alpine
-    COPY backend/backend.py backend/shadnet_client.py relay/relay.py account/create_account.py /app/
+    COPY backend/backend.py backend/catalogue.json backend/shadnet_client.py relay/relay.py account/create_account.py /app/
     USER 10001:10001
 
 services:

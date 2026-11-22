@@ -54,6 +54,7 @@ MAX_PREFS = 256 * 1024
 # largest observed value is a few hundred.
 MAX_INCREMENT = 100000
 MAX_GAME_STATS = 1000
+CATALOGUE_FIELDS = ("productId", "category", "name", "unlockLevel", "cost", "klass")
 
 API_LIMIT = (30, 600)
 GAME_LOGIN_LIMIT = (20, 600)
@@ -69,6 +70,10 @@ config = argparse.Namespace(data="backend-data.json", log="backend-requests.log"
                             register_global_per_hour=30, reserved=set(), proxy_header="",
                             trusted_proxies=set())
 lock = threading.Lock()
+products = {}
+catalogue_reply = []
+free_receipts = []
+missions = []
 register_lock = threading.Lock()
 
 
@@ -91,11 +96,33 @@ def read_json(path, default):
 
 
 def load():
-    return read_json(config.data, {"players": {}, "game_stats": []})
+    return read_json(config.data, {"players": {}, "game_stats": [], "purchases": {}})
 
 
 def save(d):
     write_json(config.data, d)
+
+
+def load_catalogue(path):
+    """catalogue.json. "products": what the game lists in its loadout and customisation menus,
+    with the rank that unlocks each and its price in coins; an entry marked "free" belongs to
+    every player from the start, and the game adds its own default equipment without being told.
+
+    "missions": the game gives an operation's reward to a player who completed its mission,
+    claiming it by itself until the products are owned. Each mission here counts as complete
+    from a rank on, which makes its reward a reward for that rank."""
+    global products, catalogue_reply, free_receipts, missions
+    data = read_json(path, {})
+    entries = data.get("products", [])
+    missions = data.get("missions", [])
+    products = {e["productId"].lower(): e for e in entries}
+    catalogue_reply = [{k: e[k] for k in CATALOGUE_FIELDS} for e in entries]
+    free_receipts = [{"productId": e["productId"]} for e in entries if e.get("free")]
+    return len(entries)
+
+
+def rank_of(player):
+    return player.get("Rank") if number(player.get("Rank")) else 1
 
 
 def new_object_id():
@@ -351,7 +378,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def _reply(self, status, payload):
         image = isinstance(payload, bytes)
-        data = payload if image else json.dumps(payload).encode()
+        data = payload if image else b"" if payload is None else json.dumps(payload).encode()
         self.send_response(status)
         self.send_header("Content-Type", "image/png" if image else "application/json; charset=utf-8")
         if image:
@@ -622,6 +649,52 @@ class Handler(BaseHTTPRequestHandler):
         return 200, {"result": {"playerStatsId": p["objectId"], "objectId": p["objectId"],
                                 "sessionToken": "r:" + secrets.token_hex(16), "properties": {}}}
 
+    def purchase(self, d, fields):
+        """Buys a product with the player's coins. The game checks only the rank before asking
+        and takes "coins" as the new balance."""
+        p = self.own_player(d, fields.get("playerStatsId"))
+        if p is None:
+            return INVALID_SESSION
+        product = fields.get("productId")
+        entry = products.get(product.lower()) if isinstance(product, str) else None
+        if entry is None:
+            return 400, {"code": 141, "error": "unknown product"}
+        owned = d.setdefault("purchases", {}).setdefault(p["objectId"], [])
+        coins = int(p["Coins"]) if number(p.get("Coins")) else 0
+        if not entry.get("free") and entry["productId"] not in owned:
+            if entry["unlockLevel"] > rank_of(p):
+                return 400, {"code": 141, "error": "rank too low for this product"}
+            if entry["cost"] > coins:
+                return 400, {"code": 141, "error": "not enough coins"}
+            coins -= entry["cost"]
+            p["Coins"] = coins
+            p["updatedAt"] = now_iso()
+            owned.append(entry["productId"])
+        return 200, {"result": {"coins": coins, "productId": product}}
+
+    def claim(self, d, fields):
+        """The game's own request for the rewards of complete missions: their products at no
+        cost, in one request for several missions or one for each."""
+        p = self.own_player(d, fields.get("playerStatsId"))
+        if p is None:
+            return INVALID_SESSION
+        ids = fields.get("productIds")
+        wanted = {i.lower() for i in ids} if isinstance(ids, list) and all(isinstance(i, str) for i in ids) else set()
+        earned = [i for m in missions if m["rank"] <= rank_of(p) for i in m["products"]]
+        if not wanted or not wanted <= {i.lower() for i in earned}:
+            return 400, {"code": 141, "error": "not the reward of a complete mission"}
+        owned = d.setdefault("purchases", {}).setdefault(p["objectId"], [])
+        owned.extend(i for i in earned if i.lower() in wanted and i not in owned)
+        return 200, {"result": {"coins": int(p["Coins"]) if number(p.get("Coins")) else 0, "productIds": ids}}
+
+    def missions_progress(self, d, pid):
+        """Every task of the missions the player's rank completes, at its target."""
+        p = next((v for v in d["players"].values() if v["objectId"] == pid), None)
+        done = [m for m in missions if p is not None and m["rank"] <= rank_of(p)]
+        return {"daily": {"active": [], "completed": [], "deleted": []},
+                "seasonal": [{"id": task, "value": target} for m in done for task, target in m["tasks"].items()],
+                "rewards": [{"id": m["reward"]} for m in done]}
+
     def _parse(self, d, method, resource, query, body):
         fields = body if isinstance(body, dict) else {}
         if resource.startswith("functions/login"):
@@ -641,8 +714,29 @@ class Handler(BaseHTTPRequestHandler):
             return 200, {"result": p.get("userPrefs") or ""}
         if resource.startswith("functions/getTuningParams"):
             return 200, {"result": {"misc": {}}}
-        if resource.startswith(("functions/getProductCatalog", "functions/getReceiptsByCategory", "functions/missions")):
-            return 200, {"result": []}
+        if resource.startswith("functions/getProductCatalog"):
+            return 200, {"result": catalogue_reply}
+        if resource.startswith("functions/getReceiptsByCategory"):
+            p = self.own_player(d, fields.get("playerStatsId"))
+            if p is None:
+                return INVALID_SESSION
+            bought = d.get("purchases", {}).get(p["objectId"], [])
+            return 200, {"result": free_receipts + [{"productId": i} for i in bought]}
+        if resource.startswith("functions/purchaseProducts"):
+            return self.claim(d, fields)
+        if resource.startswith("functions/purchaseProduct"):
+            return self.purchase(d, fields)
+        if resource.startswith("functions/missions"):
+            if method != "GET":
+                # Progress reports; the game takes only 204 as success.
+                return 204, None
+            try:
+                where = json.loads(query.get("where", ["{}"])[0])
+            except ValueError:
+                where = {}
+            pid = str((where.get("objectId") if isinstance(where, dict) else None) or query.get("objectId", [""])[0])[:64]
+            # Not wrapped in "result": the game reads the first key as the player.
+            return 200, {pid: self.missions_progress(d, pid)}
         if resource.startswith("classes/PlayerStats"):
             pid = resource.split("/")[2] if resource.count("/") >= 2 else None
             if pid is None:
@@ -699,6 +793,8 @@ def build(argv=None):
     p.add_argument("--data", default=env("FZH_BACKEND_DATA", "backend-data.json"),
                    help="progression data file; avatars/ and backend-auth.json go next to it")
     p.add_argument("--log", default=env("FZH_BACKEND_LOG", "backend-requests.log"), help="request log")
+    p.add_argument("--catalogue", default=env("FZH_CATALOGUE", os.path.join(os.path.dirname(os.path.abspath(__file__)), "catalogue.json")),
+                   help="product catalogue (default: catalogue.json next to this file)")
     p.add_argument("--shadnet-webapi", default=env("FZH_SHADNET_WEBAPI", "http://127.0.0.1:31315"),
                    help="shadNet WebAPI: avatar upload tokens and play authorization codes")
     p.add_argument("--shadnet-game", default=env("FZH_SHADNET_GAME", ""),
@@ -749,9 +845,9 @@ def build(argv=None):
         os.makedirs(os.path.dirname(path), exist_ok=True)
     auth = AuthStore(config.auth)
     limiter = Limiter()
-    started = "=== backend started %s on %s:%d, registration %s, game login %s ===" % (
+    started = "=== backend started %s on %s:%d, registration %s, game login %s, %d products ===" % (
         time.strftime("%Y-%m-%d %H:%M:%S"), a.host, a.port, "on" if config.shadnet_game else "off",
-        config.game_login)
+        config.game_login, load_catalogue(a.catalogue))
     write_log(started)
     print(started, flush=True)
     return ThreadingHTTPServer((a.host, a.port), Handler)

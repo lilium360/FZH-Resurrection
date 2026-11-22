@@ -11,7 +11,7 @@ set -euo pipefail
 . "$(dirname "$(readlink -f "$0")")/common.sh"
 become_root "$@"
 
-for f in backend/backend.py backend/shadnet_client.py relay/relay.py account/create_account.py shadnet/Dockerfile shadnet/entrypoint.sh shadnet/write-config.sh; do
+for f in backend/backend.py backend/catalogue.json backend/shadnet_client.py relay/relay.py account/create_account.py shadnet/Dockerfile shadnet/entrypoint.sh shadnet/write-config.sh; do
     if [ ! -f "$SERVER/$f" ]; then
         echo "server/$f is missing: copy the whole server/ folder to this machine." >&2
         exit 1

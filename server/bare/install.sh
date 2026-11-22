@@ -14,7 +14,7 @@ chmod 700 "$FZH_ROOT/data"
 if [ ! -x "$FZH_ROOT/bin/shadnet" ]; then
     bash "$SERVER/shadnet/build-native.sh" "$FZH_ROOT"
 fi
-for f in backend/backend.py backend/shadnet_client.py relay/relay.py account/create_account.py; do
+for f in backend/backend.py backend/catalogue.json backend/shadnet_client.py relay/relay.py account/create_account.py; do
     cp -f "$SERVER/$f" "$FZH_ROOT/app/"
 done
 for f in worlds.cfg scoreboards.cfg clientversions.cfg; do
