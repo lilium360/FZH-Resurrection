@@ -57,7 +57,13 @@
       "recoveryCode": "Recovery code",
       "recoveryPlaceholder": "Only to sign in to an account you already have",
       "signIn": "Sign in",
-      "createAccount": "Create account"
+      "createAccount": "Create account",
+      "privateQuestion": "Playing on a private server?",
+      "setPrivate": "Enter its address",
+      "onPrivate": "Not the right server?",
+      "changeAddress": "Change the address",
+      "useOfficial": "Use the community server",
+      "useServer": "Use this server"
     },
     "step4": {
       "title": "Ready",
@@ -431,6 +437,7 @@
       "gameStarted": "Game started (process {pid})",
       "gameStopped": "Game stopped",
       "gameStoppedSignOut": "Game stopped to sign out",
+      "gameStoppedServer": "Game stopped to change server",
       "invited": "{name} invited you to a match",
       "gameFolder": "Game folder: {what}",
       "folderRejected": "Folder not usable: {path} ({reason})",
@@ -471,6 +478,8 @@
       "signedIn": "Signed in as {id} on the {server}",
       "accountCreated": "Account {id} created on the {server}",
       "signedOut": "Signed out",
+      "accountRemembered": "Back on the {server} as {id}",
+      "accountRefused": "The server no longer accepts the account {id}. Signed out.",
       "handoverToGame": "Launcher signed out so the game can sign in",
       "launcherNotSignedIn": "Launcher not signed in: {reason}",
       "avatarSent": "Avatar sent to the server",
@@ -531,8 +540,8 @@
     },
     "changeServer": {
       "title": "Change server?",
-      "bodyPrivate": "You will be signed out. Accounts and friends are separate on each server: sign in again on {address}.",
-      "bodyOfficial": "You will be signed out. Accounts and friends are separate on each server: sign in again on the community server.",
+      "bodyPrivate": "You will be signed out of this server. Accounts and friends are separate on each server. This PC remembers your account on each one, so if you signed in on {address} before you will be signed in there again.",
+      "bodyOfficial": "You will be signed out of this server. Accounts and friends are separate on each server. This PC remembers your account on each one, so if you signed in on the community server before you will be signed in there again.",
       "confirm": "Change server"
     },
     "stopHosting": {
@@ -542,12 +551,19 @@
     },
     "report": {
       "title": "Report a problem",
-      "body": "Creates a text file with the info you pick. Nothing is sent anywhere: you share the file yourself. Your password is never included.",
+      "body": "Creates a text file with the information you pick. Nothing is sent anywhere: you share the file yourself. Your password is never included, and network addresses and your Windows user name are replaced by placeholders.",
       "whatHappened": "What happened?",
       "placeholder": "What you were doing and what went wrong",
       "attachLogs": "Include launcher and emulator logs",
       "attachSystem": "Include system info (GPU, driver, Windows version)",
+      "issueNote": "To report it to the project, open an issue on GitHub and attach the saved file.",
+      "openIssues": "Open the issues page",
       "cancel": "Cancel", "confirm": "Save report"
+    },
+    "reportSaved": {
+      "title": "Report saved",
+      "body": "Saved as {filename}. To report it, open an issue on GitHub and attach this file.",
+      "close": "Close"
     },
     "updateNotes": {
       "title": "What's new in {version}",
@@ -625,7 +641,6 @@
     "logCopyFailed": "Could not copy the log",
     "logCleared": "Log cleared",
     "describeFirst": "Describe what happened first",
-    "reportSaved": "Report saved as {filename}",
     "folderRecognised": "Game folder recognised",
     "pkgRecognised": "Game found — install from PKG",
     "folderNotUsable": "Cannot use this folder",
@@ -640,6 +655,7 @@
     "signedInAs": "Signed in as {id}",
     "accountCreated": "Account created: {id}",
     "signedOut": "Signed out",
+    "accountRefused": "The server no longer accepts the account {id}. Sign in again.",
     "emptyOnlineId": "Enter your Online ID",
     "enterRecoveryCode": "Enter your recovery code",
     "recoveryCopied": "Recovery code copied",

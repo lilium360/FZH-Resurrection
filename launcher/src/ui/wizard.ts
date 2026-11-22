@@ -1,11 +1,11 @@
 import { errorMessage, type DumpKind } from "../backend";
 import { t, th } from "../i18n";
-import { attempt, cancelInstall, changeLocation, chooseFolder, install, prepare, register, signedIn } from "./actions";
+import { attempt, cancelInstall, changeLocation, chooseFolder, chooseServer, install, prepare, register, signedIn } from "./actions";
 import { esc, gb, lab, options, planText, progressBar, recognised, rejection, trh } from "./components";
 import { I } from "./icons";
 import { WIZARD_LAST, fileName, wizardSteps } from "./meta";
 import { modalEl, render, toast } from "./overlay";
-import { DP, F, PR, REC, S, app, backend, canPlay, installing, missing, pkgChosen, srvName } from "./state";
+import { DP, F, PR, REC, S, SAVED, app, backend, canPlay, installing, missing, pkgChosen, srvName } from "./state";
 
 const okI = (b: boolean) => `<span class="ic ${b ? "ok" : "idle"}">${I(b ? "check" : "clock", 13)}</span>`;
 const rowW = (ok: boolean, title: string, d: string, btn = "") => `<div class="b-chk">${okI(ok)}<div><b>${title}</b><small>${d}</small></div>${btn}</div>`;
@@ -55,9 +55,49 @@ function gameFiles(): string {
   }</div>`;
 }
 
+/** What is typed in the Account step, so that a redraw keeps it; null: not typed yet. */
+const TYPED = { id: null as string | null, code: "", server: null as string | null };
+/** The Account step shows the private server's address field instead of the account's. */
+let choosingServer = false;
+
+export function wzTyped(k: string, v: string): void {
+  if (k in TYPED) (TYPED as Record<string, string | null>)[k] = v;
+}
+
+/** The Online ID stays for a later visit of the step; the recovery code does not wait in memory. */
+function leaveAccount(): void {
+  TYPED.code = "";
+  TYPED.server = null;
+  choosingServer = false;
+}
+
+function forgetTyped(): void {
+  Object.assign(TYPED, { id: null, code: "", server: null });
+  choosingServer = false;
+}
+
+const wzField = (label: string, k: string, value: string, placeholder = ""): string =>
+  `<label>${th(label)}<span class="fld w"><input data-wzf="${k}" value="${esc(value)}" spellcheck="false" autocomplete="off" placeholder="${placeholder}"></span></label>`;
+
+const wzLink = (a: string, label: string): string => `<button class="b-link" data-wz="${a}">${th(label)}</button>`;
+
+/** Which server the account is for: one line under the text, since most players stay on the community server. */
+function serverLine(): string {
+  return SAVED.usePrivateServer
+    ? `<p class="b-note">${th("wizard.step3.onPrivate")} ${wzLink("server-edit", "wizard.step3.changeAddress")} · ${wzLink("server-official", "wizard.step3.useOfficial")}</p>`
+    : `<p class="b-note">${th("wizard.step3.privateQuestion")} ${wzLink("server-edit", "wizard.step3.setPrivate")}</p>`;
+}
+
 function account(): string {
   if (PR.in) return `<div class="b-wbody">${rowW(true, th("wizard.step3.signedIn", { id: PR.id }), trh(srvName()))}</div>`;
-  return `<div class="b-form b-wbody"><label>${th("wizard.step3.onlineId")}<span class="fld w"><input data-wzf="id" value="${esc(DP.id)}" spellcheck="false" autocomplete="off"></span></label><label>${th("wizard.step3.recoveryCode")}<span class="fld w"><input data-wzf="code" spellcheck="false" autocomplete="off" placeholder="${th("wizard.step3.recoveryPlaceholder")}"></span></label><div class="b-acts" style="justify-content:flex-start;margin-top:4px"><button class="btn fill" data-wz="login">${th("wizard.step3.signIn")}</button><button class="btn" data-wz="create">${th("wizard.step3.createAccount")}</button></div></div>`;
+  const acts = (btns: string) => `<div class="b-acts" style="justify-content:flex-start;margin-top:4px">${btns}</div>`;
+  if (choosingServer)
+    return `<div class="b-form b-wbody">${wzField("meta.privateServer.label", "server", TYPED.server ?? SAVED.privateServer)}<p class="b-note">${th("meta.privateServer.note")}</p>${acts(
+      `<button class="btn fill" data-wz="server-save">${th("wizard.step3.useServer")}</button><button class="btn" data-wz="server-cancel">${th("dialog.unsavedChanges.cancel")}</button>`,
+    )}</div>`;
+  return `<div class="b-form b-wbody">${serverLine()}${wzField("wizard.step3.onlineId", "id", TYPED.id ?? DP.id)}${wzField("wizard.step3.recoveryCode", "code", TYPED.code, th("wizard.step3.recoveryPlaceholder"))}${acts(
+    `<button class="btn fill" data-wz="login">${th("wizard.step3.signIn")}</button><button class="btn" data-wz="create">${th("wizard.step3.createAccount")}</button>`,
+  )}</div>`;
 }
 
 function ready(): string {
@@ -88,6 +128,9 @@ export function wizard(): void {
     modalEl.innerHTML = "";
     return;
   }
+  const active = document.activeElement as HTMLInputElement | null;
+  const focused = active && modalEl.contains(active) ? active.dataset.wzf : undefined;
+  const caret = active?.selectionStart ?? null;
   const steps = wizardSteps();
   const body = [
     () => picker("launcherLanguage", "wizard.step0.label"),
@@ -107,10 +150,15 @@ export function wizard(): void {
     .map((s, i) => `<i class="${i <= WZ ? "on" : ""}" title="${esc(s)}"></i>`)
     .join("")}</div><h2 id="wz-t">${th(`wizard.step${WZ}.title`)}</h2><p>${text}</p>${body}
     <div class="b-acts split">${WZ < WIZARD_LAST ? `<button class="b-link" data-wz="skip">${th("wizard.nav.skip")}</button>` : "<span></span>"}<span>${WZ > 0 ? `<button class="btn" data-wz="back">${th("wizard.nav.back")}</button>` : ""}<button class="btn fill" data-wz="next">${next}</button></span></div></div></div>`;
+  const again = focused ? modalEl.querySelector<HTMLInputElement>(`[data-wzf="${focused}"]`) : null;
+  if (!again) return;
+  again.focus();
+  again.setSelectionRange(caret, caret);
 }
 
 function finish(message: string): void {
   app.wz = null;
+  forgetTyped();
   wizard();
   render();
   toast(message);
@@ -127,8 +175,11 @@ export async function wzAct(a: string): Promise<void> {
       return;
     }
     app.wz++;
-  } else if (a === "back") app.wz--;
-  else if (a === "skip") {
+    leaveAccount();
+  } else if (a === "back") {
+    app.wz--;
+    leaveAccount();
+  } else if (a === "skip") {
     finish(t("wizard.toast.skipped"));
     return;
   } else if (a === "game" || a === "base" || a === "update") {
@@ -154,7 +205,7 @@ export async function wzAct(a: string): Promise<void> {
       return;
     }
     if (a === "create") {
-      await register(id);
+      if (await register(id)) forgetTyped();
       return;
     }
     if (!code) {
@@ -163,13 +214,23 @@ export async function wzAct(a: string): Promise<void> {
     }
     try {
       await signedIn(await backend.signIn(id, code));
+      forgetTyped();
       toast(t("toast.signedInAs", { id: PR.id }));
     } catch (e) {
       toast(errorMessage(e), true);
       return;
     }
+  } else if (a === "server-edit" || a === "server-cancel") {
+    choosingServer = a === "server-edit";
+    TYPED.server = null;
+  } else if (a === "server-save" || a === "server-official") {
+    if (!(await chooseServer(a === "server-save", a === "server-save" ? field("server") : undefined))) return;
+    choosingServer = false;
+    TYPED.server = null;
+    toast(t("toast.changesSaved"));
   }
   wizard();
   render();
+  if (a === "server-edit") modalEl.querySelector<HTMLInputElement>('[data-wzf="server"]')?.select();
 }
 

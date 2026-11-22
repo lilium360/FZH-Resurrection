@@ -1,4 +1,4 @@
-import { errorMessage, type PickKind } from "../backend";
+import { errorMessage, type ExternalLink, type PickKind } from "../backend";
 import { setLang, t, th, tr } from "../i18n";
 import {
   attempt,
@@ -44,7 +44,7 @@ import {
   setSetting,
   srvName,
 } from "./state";
-import { wizard, wzAct } from "./wizard";
+import { wizard, wzAct, wzTyped } from "./wizard";
 
 const EMAIL = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
 
@@ -156,12 +156,15 @@ async function onClick(e: MouseEvent): Promise<void> {
               backend.saveProblemReport({ description, attachLogs: on("logs"), attachSystem: on("sys") }, t("dialog.saveReportPicker")),
             );
             if (!path) return false;
-            toast(t("toast.reportSaved", { filename: path.split(/[\\/]/).pop() ?? path }));
+            ask(th("dialog.reportSaved.title"), th("dialog.reportSaved.body", { filename: path.split(/[\\/]/).pop() ?? path }), [
+              { label: th("dialog.reportSaved.close") },
+              { label: th("dialog.report.openIssues"), cls: "fill", fn: () => attempt(() => backend.openLink("issues")) },
+            ]);
             return true;
           },
         },
       ],
-      `<div class="b-form b-wbody"><label>${th("dialog.report.whatHappened")}<span class="fld ta"><textarea placeholder="${th("dialog.report.placeholder")}"></textarea></span></label>${ck("logs", "dialog.report.attachLogs")}${ck("sys", "dialog.report.attachSystem")}</div>`,
+      `<div class="b-form b-wbody"><label>${th("dialog.report.whatHappened")}<span class="fld ta"><textarea placeholder="${th("dialog.report.placeholder")}"></textarea></span></label>${ck("logs", "dialog.report.attachLogs")}${ck("sys", "dialog.report.attachSystem")}<p class="b-note">${th("dialog.report.issueNote")} <button class="b-link" data-link="issues">${th("dialog.report.openIssues")}</button></p></div>`,
       true,
     );
     return;
@@ -468,7 +471,31 @@ function onChange(e: Event): void {
   }
   const k = el.dataset.k;
   if (isKey(k)) setSetting(k, el.type === "range" ? +el.value : el.value);
-  if (k || el.dataset.p === "id") render();
+  if (k || el.dataset.p === "id") renderAfterPress();
+}
+
+let pressed = false;
+let renderDue = false;
+
+/**
+ * A field's `change` fires on the mousedown that takes the focus from it. Redrawing there replaces the button under
+ * the pointer before the mouse is released, and its click never comes: the redraw waits until the press is over.
+ */
+function renderAfterPress(): void {
+  if (pressed) renderDue = true;
+  else render();
+}
+
+function onPress(): void {
+  pressed = true;
+}
+
+/** The click follows the release in the same task, so the timer runs after its handler. */
+function onRelease(): void {
+  pressed = false;
+  if (!renderDue) return;
+  renderDue = false;
+  setTimeout(render);
 }
 
 async function onModalClick(e: MouseEvent): Promise<void> {
@@ -476,6 +503,11 @@ async function onModalClick(e: MouseEvent): Promise<void> {
   const w = target.closest<HTMLButtonElement>("[data-wz]");
   if (w) {
     if (!w.disabled) await wzAct(w.dataset.wz ?? "");
+    return;
+  }
+  const link = target.closest<HTMLButtonElement>("[data-link]");
+  if (link) {
+    await attempt(() => backend.openLink(link.dataset.link as ExternalLink));
     return;
   }
   const r = target.closest<HTMLButtonElement>("[data-rec]");
@@ -534,12 +566,21 @@ function onModalChange(e: Event): void {
   toast(t(k === "launcherLanguage" ? "wizard.toast.languageSaved" : "toast.changesSaved"));
 }
 
+function onModalInput(e: Event): void {
+  const el = e.target as HTMLInputElement;
+  if (el.dataset.wzf) wzTyped(el.dataset.wzf, el.value);
+}
+
 export function bindEvents(): void {
   root.addEventListener("click", (e) => void onClick(e));
   root.addEventListener("input", onInput);
   root.addEventListener("change", onChange);
+  addEventListener("pointerdown", onPress, true);
+  addEventListener("pointerup", onRelease, true);
+  addEventListener("pointercancel", onRelease, true);
   modalEl.addEventListener("click", (e) => void onModalClick(e));
   modalEl.addEventListener("change", onModalChange);
+  modalEl.addEventListener("input", onModalInput);
   addEventListener("keydown", (e) => {
     if (e.key === "Escape" && MODAL) closeModal();
   });

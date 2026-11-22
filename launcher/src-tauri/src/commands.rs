@@ -8,7 +8,7 @@ use crate::report::ProblemReport;
 use crate::settings::Settings;
 use crate::store::{self, LauncherFile};
 use crate::warmup::{self, ShaderCacheState};
-use crate::{account, audio, env, files, instance, log, report, users, AppState, Running};
+use crate::{account, audio, env, files, instance, log, report, users, vault, AppState, Running};
 use serde::Serialize;
 use serde_json::{json, Value};
 use std::path::{Path, PathBuf};
@@ -32,6 +32,8 @@ pub struct AppInfo {
 
 const SOURCE_URL: &str = "https://github.com/lilium360/FZH-Resurrection";
 const LICENCE_URL: &str = "https://github.com/lilium360/FZH-Resurrection/blob/main/LICENSE";
+/// Where the player attaches the saved problem report.
+const ISSUES_URL: &str = "https://github.com/lilium360/FZH-Resurrection/issues/new/choose";
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -173,8 +175,12 @@ pub fn install_update(app: AppHandle) -> Res<()> {
 #[tauri::command]
 pub fn open_link(app: AppHandle, state: State<'_, AppState>, target: String) -> Res<()> {
     match target.as_str() {
-        "source" | "licence" => {
-            let url = if target == "source" { SOURCE_URL } else { LICENCE_URL };
+        "source" | "licence" | "issues" => {
+            let url = match target.as_str() {
+                "source" => SOURCE_URL,
+                "licence" => LICENCE_URL,
+                _ => ISSUES_URL,
+            };
             app.opener().open_url(url, None::<&str>).map_err(|e| BackendError::internal(format!("Cannot open the link: {e}")))
         }
         "licences" => {
@@ -224,12 +230,24 @@ pub fn load_settings(state: State<'_, AppState>) -> Res<Settings> {
     Ok(store::load_settings(&state.layout.settings_json()))
 }
 
+/// A change of server also changes the account in use (`Account::change_server`).
 #[tauri::command]
-pub fn save_settings(state: State<'_, AppState>, settings: Settings) -> Res<Settings> {
+pub async fn save_settings(app: AppHandle, settings: Settings) -> Res<Settings> {
     let normalized = settings.normalized()?;
-    store::save_settings(&state.layout.settings_json(), &normalized)?;
-    state.account.wake();
-    Ok(normalized)
+    blocking(&app, move |a| {
+        let state = a.state::<AppState>();
+        let path = state.layout.settings_json();
+        let (from, to) = (store::load_settings(&path).server(), normalized.server());
+        let write = || store::save_settings(&path, &normalized);
+        if vault::server_key(&from) == vault::server_key(&to) {
+            write()?;
+        } else {
+            state.account.change_server(&env(a), &from, &to, write)?;
+        }
+        state.account.wake();
+        Ok(normalized)
+    })
+    .await
 }
 
 #[tauri::command]

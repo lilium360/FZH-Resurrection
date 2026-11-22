@@ -59,8 +59,8 @@ const newCode = (): string => {
 };
 const ONLINE_ID = /^[A-Za-z0-9_-]{3,16}$/;
 const badOnlineId = () => err("invalid_input", "backend.online_id_format", "Online ID: 3 to 16 letters, digits, - and _.");
-const unreachableAccounts = () =>
-  err("server_unreachable", "backend.account_unreachable", "Cannot reach the account service of the community server.", { server: msg("server.official", "community server") });
+const unreachableAccounts = (server: Msg) =>
+  err("server_unreachable", "backend.account_unreachable", `Cannot reach the account service of the ${server.message}.`, { server });
 
 const info = (path: string, version: string, source: "folder" | "pkg" = "folder"): DumpInfo => ({ path, titleId: "CUSA11182", region: "Europe", version, source });
 const MERGED = "D:\\Games\\Firewall Zero Hour\\CUSA11182";
@@ -160,8 +160,23 @@ export function createMockBackend(hooks: MockHooks): Backend {
   let session: Session | null = null;
   let profile: Session = { onlineId: "Player1", email: "", avatar: 0, image: null };
   let inviteTimer: number | undefined;
-  /** Lower-case Online ID -> registered casing and canonical recovery code. "Player1" has the contract's test code. */
-  const accounts = new Map([["player1", { onlineId: "Player1", code: canonicalCode("ABCDE-FGHJK-MNPQR-STVWX-YZ012")! }]]);
+  /** The server in use, as the back end tells servers apart: "" for the community server, else the address without its relay part. */
+  const serverOf = (s: Settings) => (s.usePrivateServer ? s.privateServer.replace(/\/.*$/, "").toLowerCase() : "");
+  const serverName = (): Msg =>
+    settings.usePrivateServer
+      ? msg("server.private", `private server ${settings.privateServer}`, { address: settings.privateServer })
+      : msg("server.official", "community server");
+  type Registered = Map<string, { onlineId: string; code: string }>;
+  /** Per server: lower-case Online ID -> registered casing and canonical recovery code. "Player1" has the contract's test code on every server. */
+  const registered = new Map<string, Registered>();
+  const accounts = (): Registered => {
+    const key = serverOf(settings);
+    let list = registered.get(key);
+    if (!list) registered.set(key, (list = new Map([["player1", { onlineId: "Player1", code: canonicalCode("ABCDE-FGHJK-MNPQR-STVWX-YZ012")! }]])));
+    return list;
+  };
+  /** The account each server was left with. */
+  const remembered = new Map<string, Session>();
   let hosting: HostingState = { running: false, services: { network: false, progression: false, relay: false } };
   const cache: ShaderCacheState = { status: "ready", round: 0, rounds: 8, minRounds: 2, roundSeconds: 345 };
   const update = { current: "0.1.0", latest: "0.2.0", downloaded: false, installed: false };
@@ -188,12 +203,18 @@ export function createMockBackend(hooks: MockHooks): Backend {
     }, 4000);
   };
 
+  /** The server answers that the account taken up again is gone. */
+  const refuse = () => {
+    if (!session) return;
+    log("log.event.accountRefused", `Network: the server no longer accepts the account ${session.onlineId}: signed out`, { id: session.onlineId });
+    session = null;
+    emit("account", { session: null, lastOnlineId: profile.onlineId });
+  };
+
   const startGame = () => {
     running = true;
     emit("game-state", { running: true, exitCode: null });
-    const server = settings.usePrivateServer
-      ? msg("server.private", `private server ${settings.privateServer}`, { address: settings.privateServer })
-      : msg("server.official", "community server");
+    const server = serverName();
     const density = settings.pixelDensity === "default" ? "1.0" : settings.pixelDensity;
     const lines: [string, string, Params][] = [
       ["log.event.playingOn", `Launcher: playing on the ${server.message}`, { server }],
@@ -271,7 +292,22 @@ export function createMockBackend(hooks: MockHooks): Backend {
       if (next.usePrivateServer && !/^[A-Za-z0-9._-]+((:\d{1,5}){5})?(\/[A-Za-z0-9._-]+(:\d{1,5})?)?$/.test(next.privateServer.trim())) {
         throw err("invalid_input", "backend.invalid_server_address", "The server address can only hold letters, digits, dots, hyphens and underscores");
       }
-      settings = { ...next, privateServer: next.privateServer.trim() };
+      const saved = { ...next, privateServer: next.privateServer.trim() };
+      const [from, to] = [serverOf(settings), serverOf(saved)];
+      if (from !== to && running) throw err("game_running", "backend.account_game_running", "Close the game first: it uses the account while it runs.");
+      settings = saved;
+      if (from !== to) {
+        clearTimeout(inviteTimer);
+        if (session) remembered.set(from, session);
+        else remembered.delete(from);
+        session = remembered.get(to) ?? null;
+        if (session) {
+          profile = { ...session };
+          log("log.event.accountRemembered", `Network: back on the ${serverName().message} with the account ${session.onlineId}`, { id: session.onlineId, server: serverName() });
+          if (session.onlineId.toLowerCase().startsWith("refused")) window.setTimeout(refuse, 1500);
+          else scheduleInvite();
+        }
+      }
       return { ...settings };
     },
     async listAudioDevices() {
@@ -475,26 +511,26 @@ export function createMockBackend(hooks: MockHooks): Backend {
       if (!ONLINE_ID.test(onlineId.trim())) throw badOnlineId();
       const code = canonicalCode(recoveryCode);
       if (!code) throw err("invalid_input", "backend.recovery_code_invalid", "That is not a recovery code: it has 25 letters and digits in five groups.");
-      const known = accounts.get(onlineId.trim().toLowerCase());
+      const known = accounts().get(onlineId.trim().toLowerCase());
       if (known?.code !== code) throw err("wrong_password", "backend.recover_wrong", "Wrong Online ID or recovery code.");
       profile = { ...profile, onlineId: known.onlineId };
       session = { ...profile };
       scheduleInvite();
       return { ...session };
     },
-    /** Names starting with taken, admin, busy, closed or offline show those refusals; nosign creates the account but the sign-in fails. */
+    /** Names starting with taken, admin, busy, closed or offline show those refusals; nosign creates the account but the sign-in fails; refused is turned away when its server is chosen again. */
     async register(onlineId) {
       const id = onlineId.trim();
       if (!ONLINE_ID.test(id)) throw badOnlineId();
       const lower = id.toLowerCase();
-      if (lower.startsWith("offline")) throw unreachableAccounts();
+      if (lower.startsWith("offline")) throw unreachableAccounts(serverName());
       if (lower.startsWith("busy")) throw err("busy", "backend.account_rate_limited", "Too many attempts from this network. Try again in 42 s.", { seconds: { seconds: 42 } });
       if (lower.startsWith("closed")) throw err("unsupported", "backend.register_closed", "This server does not create accounts.");
       if (lower.startsWith("admin")) throw err("invalid_input", "backend.register_name_reserved", "That Online ID is reserved. Choose another one.");
-      if (lower.startsWith("taken") || accounts.has(lower)) throw err("already_exists", "backend.register_id_taken", "That Online ID is taken.");
+      if (lower.startsWith("taken") || accounts().has(lower)) throw err("already_exists", "backend.register_id_taken", "That Online ID is taken.");
       const recoveryCode = newCode();
-      accounts.set(lower, { onlineId: id, code: canonicalCode(recoveryCode)! });
-      log("log.event.accountCreated", `Network: account ${id} created on the community server`, { id, server: msg("server.official", "community server") });
+      accounts().set(lower, { onlineId: id, code: canonicalCode(recoveryCode)! });
+      log("log.event.accountCreated", `Network: account ${id} created on the ${serverName().message}`, { id, server: serverName() });
       profile = { ...profile, onlineId: id };
       session = { ...profile };
       if (lower.startsWith("nosign")) {
@@ -507,6 +543,7 @@ export function createMockBackend(hooks: MockHooks): Backend {
     async signOut() {
       clearTimeout(inviteTimer);
       session = null;
+      remembered.delete(serverOf(settings));
     },
     async updateProfile(p) {
       requireSession();

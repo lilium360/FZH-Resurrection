@@ -317,8 +317,8 @@ export interface LogLine {
   params?: Params;
 }
 
-/** The source repository, its licence, the bundled licence texts. */
-export type ExternalLink = "source" | "licence" | "licences";
+/** The source repository, its licence, the bundled licence texts, the page where a problem report is filed. */
+export type ExternalLink = "source" | "licence" | "licences" | "issues";
 
 export type BackendErrorCode =
   | "invalid_input"
@@ -362,6 +362,8 @@ export interface BackendEvents {
   "install-progress": InstallProgress;
   "cache-progress": ShaderCacheState;
   friends: FriendsState;
+  /** The server refused the stored account and the launcher signed it out. */
+  account: AccountState;
   invite: Invite;
   hosting: HostingState;
   "server-status": ServerStatus;
@@ -386,6 +388,7 @@ export interface Backend {
   saveProblemReport(report: ProblemReport, title: string): Promise<string | null>;
 
   loadSettings(): Promise<Settings>;
+  /** A change of server also changes the account: the one this PC remembers for the new server, or none (`getAccount` tells). */
   saveSettings(settings: Settings): Promise<Settings>;
   listAudioDevices(): Promise<AudioDevices>;
 
@@ -422,6 +425,7 @@ export interface Backend {
   signIn(onlineId: string, recoveryCode: string): Promise<Session>;
   /** Creates an account with a new recovery code and signs in. */
   register(onlineId: string): Promise<Registration>;
+  /** Also forgets the account of the server in use on this PC. */
   signOut(): Promise<void>;
   updateProfile(profile: ProfileUpdate): Promise<Session>;
   /** Sends the avatar the player sees (a 256×256 PNG data URL) to the server, where the game reads it; the outcome is also logged. */

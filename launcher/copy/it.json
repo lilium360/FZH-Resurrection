@@ -57,7 +57,13 @@
       "recoveryCode": "Codice di recupero",
       "recoveryPlaceholder": "Solo per accedere a un account che hai già",
       "signIn": "Accedi",
-      "createAccount": "Crea account"
+      "createAccount": "Crea account",
+      "privateQuestion": "Giochi su un server privato?",
+      "setPrivate": "Inserisci il suo indirizzo",
+      "onPrivate": "Non è il server giusto?",
+      "changeAddress": "Cambia indirizzo",
+      "useOfficial": "Usa il server della community",
+      "useServer": "Usa questo server"
     },
     "step4": {
       "title": "Pronto",
@@ -431,6 +437,7 @@
       "gameStarted": "Gioco avviato (processo {pid})",
       "gameStopped": "Gioco fermato",
       "gameStoppedSignOut": "Gioco fermato per uscire dall'account",
+      "gameStoppedServer": "Gioco fermato per cambiare server",
       "invited": "{name} ti ha invitato a una partita",
       "gameFolder": "Cartella di gioco: {what}",
       "folderRejected": "Cartella non utilizzabile: {path} ({reason})",
@@ -471,6 +478,8 @@
       "signedIn": "Connesso come {id} sul {server}",
       "accountCreated": "Account {id} creato sul {server}",
       "signedOut": "Disconnesso",
+      "accountRemembered": "Di nuovo sul {server} come {id}",
+      "accountRefused": "Il server non accetta più l'account {id}. Disconnesso.",
       "handoverToGame": "Launcher disconnesso perché possa accedere il gioco",
       "launcherNotSignedIn": "Launcher non connesso: {reason}",
       "avatarSent": "Avatar inviato al server",
@@ -531,8 +540,8 @@
     },
     "changeServer": {
       "title": "Cambiare server?",
-      "bodyPrivate": "Verrai disconnesso. Account e amici sono separati per ogni server: accedi di nuovo su {address}.",
-      "bodyOfficial": "Verrai disconnesso. Account e amici sono separati per ogni server: accedi di nuovo sul server della community.",
+      "bodyPrivate": "Verrai disconnesso da questo server. Account e amici sono separati per ogni server. Questo PC ricorda il tuo account su ciascuno: se hai già effettuato l'accesso su {address}, lì verrai connesso di nuovo.",
+      "bodyOfficial": "Verrai disconnesso da questo server. Account e amici sono separati per ogni server. Questo PC ricorda il tuo account su ciascuno: se hai già effettuato l'accesso sul server della community, lì verrai connesso di nuovo.",
       "confirm": "Cambia server"
     },
     "stopHosting": {
@@ -542,12 +551,19 @@
     },
     "report": {
       "title": "Segnala un problema",
-      "body": "Crea un file di testo con le informazioni che scegli. Non viene inviato nulla: il file lo condividi tu. La tua password non è mai inclusa.",
+      "body": "Crea un file di testo con le informazioni che scegli. Non viene inviato nulla: il file lo condividi tu. La tua password non è mai inclusa; gli indirizzi di rete e il nome utente di Windows sono sostituiti da segnaposto.",
       "whatHappened": "Che cosa è successo?",
       "placeholder": "Cosa stavi facendo e cosa è andato storto",
       "attachLogs": "Includi i log del launcher e dell'emulatore",
       "attachSystem": "Includi informazioni di sistema (GPU, driver, versione di Windows)",
+      "issueNote": "Per segnalarlo al progetto, apri una issue su GitHub e allega il file salvato.",
+      "openIssues": "Apri la pagina delle issue",
       "cancel": "Annulla", "confirm": "Salva segnalazione"
+    },
+    "reportSaved": {
+      "title": "Segnalazione salvata",
+      "body": "Salvato come {filename}. Per segnalarlo, apri una issue su GitHub e allega questo file.",
+      "close": "Chiudi"
     },
     "updateNotes": {
       "title": "Novità della versione {version}",
@@ -625,7 +641,6 @@
     "logCopyFailed": "Impossibile copiare il log",
     "logCleared": "Log svuotato",
     "describeFirst": "Prima descrivi cosa è successo",
-    "reportSaved": "Segnalazione salvata come {filename}",
     "folderRecognised": "Cartella di gioco riconosciuta",
     "pkgRecognised": "Gioco trovato — installazione da PKG",
     "folderNotUsable": "Questa cartella non è utilizzabile",
@@ -640,6 +655,7 @@
     "signedInAs": "Connesso come {id}",
     "accountCreated": "Account creato: {id}",
     "signedOut": "Disconnesso",
+    "accountRefused": "Il server non accetta più l'account {id}. Effettua di nuovo l'accesso.",
     "emptyOnlineId": "Inserisci il tuo Online ID",
     "enterRecoveryCode": "Inserisci il codice di recupero",
     "recoveryCopied": "Codice di recupero copiato",

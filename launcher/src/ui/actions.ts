@@ -244,13 +244,18 @@ export function discard(): void {
   Object.assign(DP, { id: PR.id, av: PR.av, img: PR.img });
 }
 
-export async function signOut(): Promise<void> {
-  if (app.run) await attempt(() => stopGame(logMsg("log.event.gameStoppedSignOut")));
-  await attempt(() => backend.signOut());
+/** The UI's side of being signed out; the back end already is. */
+export function signedOut(): void {
   PR.in = false;
   app.invites = [];
   app.friends = { friends: [], incoming: [], outgoing: [] };
   Object.assign(DP, { id: PR.id, av: PR.av, img: PR.img });
+}
+
+export async function signOut(): Promise<void> {
+  if (app.run) await attempt(() => stopGame(logMsg("log.event.gameStoppedSignOut")));
+  await attempt(() => backend.signOut());
+  signedOut();
 }
 
 /** After a sign-in: the server gets the avatar the launcher shows. Never in the way of the sign-in; the outcome goes to the log. */
@@ -296,6 +301,53 @@ export async function loadFriends(): Promise<void> {
   if (fr) app.friends = fr;
 }
 
+/** The game and the hosting belong to the server being left. */
+async function leaveServer(): Promise<void> {
+  if (app.run) await attempt(() => stopGame(logMsg("log.event.gameStoppedServer")));
+  if (!app.host) return;
+  const h = await attempt(() => backend.stopHosting());
+  if (h) app.host = h.running;
+}
+
+/** After a change of server: the account this PC remembers for it, or signed out. */
+async function takeAccount(): Promise<void> {
+  const a = await attempt(() => backend.getAccount());
+  if (!a) return;
+  if (!a.session) {
+    signedOut();
+    return;
+  }
+  await signedIn(a.session);
+  toast(t("toast.signedInAs", { id: PR.id }));
+}
+
+/** An address without its relay part: the relays do not make it another server. */
+const services = (address: string): string => address.trim().replace(/\/.*$/, "").toLowerCase();
+
+/** The edited settings name another server than the saved ones. */
+const serverEdited = (): boolean =>
+  S.usePrivateServer !== SAVED.usePrivateServer || (S.usePrivateServer && services(S.privateServer) !== services(SAVED.privateServer));
+
+/** Saves the server choice alone, as the Advanced screen does, and leaves other unsaved edits as they are. */
+export async function chooseServer(usePrivateServer: boolean, address: string = SAVED.privateServer): Promise<boolean> {
+  const privateServer = address.trim();
+  if (usePrivateServer && !privateServer) {
+    toast(t("toast.emptyServer"), true);
+    return false;
+  }
+  await leaveServer();
+  try {
+    const saved = await backend.saveSettings({ ...SAVED, usePrivateServer, privateServer });
+    for (const o of [S, SAVED]) Object.assign(o, { usePrivateServer: saved.usePrivateServer, privateServer: saved.privateServer });
+  } catch (e) {
+    toast(errorMessage(e), true);
+    return false;
+  }
+  await takeAccount();
+  refresh();
+  return true;
+}
+
 export async function save(): Promise<void> {
   if (PR.in && !DP.id.trim()) {
     toast(t("toast.onlineIdEmpty"), true);
@@ -305,13 +357,15 @@ export async function save(): Promise<void> {
     toast(t("toast.emptyServer"), true);
     return;
   }
-  const commit = async () => {
+  const commit = async (moved = false) => {
     const profileChanged = dirtyP();
     try {
+      if (moved) await leaveServer();
       const saved = await backend.saveSettings({ ...S });
       Object.assign(SAVED, saved);
       Object.assign(S, saved);
-      if (PR.in && profileChanged) {
+      if (moved) await takeAccount();
+      else if (PR.in && profileChanged) {
         const shown = DP.av !== PR.av || (DP.av === "img" && DP.img !== PR.img);
         const s = await backend.updateProfile({ onlineId: DP.id.trim(), avatar: DP.av === "img" ? "image" : DP.av, image: DP.img });
         applySession(s);
@@ -331,22 +385,16 @@ export async function save(): Promise<void> {
       () => commit(),
       false,
     );
-  else if (S.usePrivateServer !== SAVED.usePrivateServer && PR.in)
+  else if (serverEdited() && PR.in)
     confirmIt(
       th("dialog.changeServer.title"),
-      S.usePrivateServer ? th("dialog.changeServer.bodyPrivate", { address: S.privateServer }) : th("dialog.changeServer.bodyOfficial"),
+      (app.run ? th("dialog.signOut.bodyGame") : "") +
+        (S.usePrivateServer ? th("dialog.changeServer.bodyPrivate", { address: S.privateServer.trim() }) : th("dialog.changeServer.bodyOfficial")),
       th("dialog.changeServer.confirm"),
-      async () => {
-        await signOut();
-        if (app.host) {
-          const h = await attempt(() => backend.stopHosting());
-          if (h) app.host = h.running;
-        }
-        await commit();
-      },
+      () => commit(true),
       false,
     );
-  else await commit();
+  else await commit(serverEdited());
 }
 
 /** `quiet`: the check at start, which shows nothing when it fails (the back end logs why). */

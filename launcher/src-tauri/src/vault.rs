@@ -10,11 +10,17 @@ pub trait Vault: Send + Sync {
     fn delete(&self, target: &str);
 }
 
+/// What tells one server's accounts from another's: `<host>:<game port>` in lower case. The relay
+/// part of an address does not count.
+pub fn server_key(server: &str) -> String {
+    let at = Server::of(server);
+    format!("{}:{}", at.host.to_ascii_lowercase(), at.game)
+}
+
 /// The credential's name, as shown in the Credential Manager. Names are unique ignoring case on
 /// shadNet, so the Online ID is lower-cased.
 pub fn target(server: &str, online_id: &str) -> String {
-    let at = Server::of(server);
-    format!("FZH Resurrection/{}:{}/{}", at.host.to_ascii_lowercase(), at.game, online_id.to_ascii_lowercase())
+    format!("FZH Resurrection/{}/{}", server_key(server), online_id.to_ascii_lowercase())
 }
 
 pub struct System;
@@ -103,5 +109,7 @@ mod tests {
         assert_eq!(target("127.0.0.1", "Player_One"), "FZH Resurrection/127.0.0.1:31313/player_one");
         assert_eq!(target("Example.Test", "a-b"), target("example.test", "A-B"));
         assert_ne!(target("10.0.0.1", "x_y"), target("10.0.0.2", "x_y"));
+        assert_eq!(server_key("Play.Example/relay.example:9000"), "play.example:31313");
+        assert_ne!(server_key("play.example"), server_key("play.example:40001:40002:40003:40004:40005"));
     }
 }

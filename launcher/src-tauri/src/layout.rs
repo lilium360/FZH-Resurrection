@@ -68,6 +68,10 @@ impl Layout {
     pub fn account_json(&self) -> PathBuf {
         self.data.join("account.json")
     }
+    /// Which account each server was left with (`accounts.rs`). Never the password.
+    pub fn accounts_json(&self) -> PathBuf {
+        self.data.join("accounts.json")
+    }
     /// The player's own avatar picture (256x256 PNG), when they chose one.
     pub fn avatar_png(&self) -> PathBuf {
         self.data.join("avatar.png")

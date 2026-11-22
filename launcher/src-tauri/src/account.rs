@@ -3,7 +3,9 @@
 //!
 //! The password lives in the Windows Credential Manager (`vault.rs`), the launcher's own copy, and
 //! in the instance's `users.json` (`users.rs`), where the emulator reads it. The recovery code is
-//! never stored. The launcher holds one connection while it is open and the game is not running: shadNet
+//! never stored. Accounts are per server: `users.json` holds the one of the server in use, and
+//! `accounts.json` (`accounts.rs`) remembers which account each other server was left with, so
+//! `change_server` can take it up again. The launcher holds one connection while it is open and the game is not running: shadNet
 //! refuses a second session of the same account, so `suspend` closes it before a launch and
 //! `resume` lets the monitor sign in again after the game exits. While the launcher holds the
 //! session, shadNet sends it the invitations to game sessions as well (`invite` event); while the
@@ -19,7 +21,7 @@ use crate::shadnet::proto::Notification;
 use crate::shadnet::{self, packet};
 use crate::users::{self, Credentials};
 use crate::vault::{self, Vault};
-use crate::{avatar, clock, recovery, store};
+use crate::{accounts, avatar, clock, recovery, store};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::sync::{Arc, Condvar, Mutex};
@@ -150,6 +152,17 @@ fn prefs(env: &EnvRef) -> Prefs {
 fn save_prefs(env: &EnvRef, p: &Prefs) -> Res<()> {
     let bytes = serde_json::to_vec_pretty(p).map_err(|e| BackendError::internal(e.to_string()))?;
     store::write_atomic(&env.layout().account_json(), &bytes)
+}
+
+fn edit_remembered(env: &EnvRef, f: impl FnOnce(&mut accounts::Accounts)) -> Res<()> {
+    let path = env.layout().accounts_json();
+    let before = accounts::load(&path);
+    let mut after = accounts::load(&path);
+    f(&mut after);
+    if after == before {
+        return Ok(());
+    }
+    accounts::save(&path, &after)
 }
 
 fn registered_email(online_id: &str) -> String {
@@ -413,23 +426,91 @@ impl Account {
         })
     }
 
-    /// Closes the session and removes the credentials from users.json. The caller stops the game first.
+    fn clear_friends(&self, env: &EnvRef) {
+        let mut i = self.inner.lock().unwrap();
+        i.friends = FriendsState::default();
+        i.problem.clear();
+        emit_friends(env, &i.friends);
+    }
+
+    /// Closes the session, removes the credentials from users.json and forgets the account of this
+    /// server on this PC. The caller stops the game first.
     pub fn sign_out(&self, env: &EnvRef) -> Res<()> {
         let _g = self.connect.lock().unwrap();
         if let Some(conn) = self.take_conn() {
             conn.close();
         }
+        let host = host(env);
         if let Some(c) = stored(env) {
-            env.vault().delete(&vault::target(&host(env), &c.npid));
+            env.vault().delete(&vault::target(&host, &c.npid));
         }
         edit_users(env, users::clear_account)?;
-        let mut i = self.inner.lock().unwrap();
-        i.friends = FriendsState::default();
-        i.problem.clear();
-        emit_friends(env, &i.friends);
-        drop(i);
+        let _ = edit_remembered(env, |a| a.forget(&host));
+        self.clear_friends(env);
         env.log(Msg::new("log.event.signedOut", "Network: signed out"));
         Ok(())
+    }
+
+    /// The player moves from the server `from` to `to`; `save` writes the settings that say so.
+    /// The session closes and the account in use stays remembered for `from`, its password in the
+    /// Credential Manager. The account remembered for `to` becomes the one in `users.json` again
+    /// when the Credential Manager still has its password, and the monitor signs it in; otherwise
+    /// the launcher is signed out there.
+    pub fn change_server(&self, env: &EnvRef, from: &str, to: &str, save: impl FnOnce() -> Res<()>) -> Res<()> {
+        let _g = self.connect.lock().unwrap();
+        self.refuse_while_playing()?;
+        let left = stored(env);
+        let kept = left.as_ref().is_some_and(|c| {
+            let target = vault::target(from, &c.npid);
+            env.vault().get(&target).is_some() || env.vault().set(&target, &c.npid, &c.password).is_ok()
+        });
+        edit_remembered(env, |a| match &left {
+            Some(c) if kept => a.remember(from, &c.npid, &c.email),
+            _ => a.forget(from),
+        })?;
+        save()?;
+        if let Some(conn) = self.take_conn() {
+            conn.close();
+        }
+        let back = accounts::load(&env.layout().accounts_json()).get(to).and_then(|r| {
+            let password = env.vault().get(&vault::target(to, &r.online_id))?;
+            let email = if r.email.is_empty() { registered_email(&r.online_id) } else { r.email.clone() };
+            Some(Credentials { npid: r.online_id.clone(), password, email })
+        });
+        edit_users(env, |v| match &back {
+            Some(c) => users::set_account(v, c),
+            None => users::clear_account(v),
+        })?;
+        self.clear_friends(env);
+        if left.is_some() {
+            env.log(Msg::new("log.event.signedOut", "Network: signed out"));
+        }
+        if let Some(c) = &back {
+            let server = crate::settings::server_name(to);
+            env.log(
+                Msg::new("log.event.accountRemembered", format!("Network: back on the {} with the account {}", server.message, c.npid))
+                    .with("id", c.npid.clone())
+                    .with("server", server),
+            );
+        }
+        Ok(())
+    }
+
+    /// The server answered that the stored account's Online ID or password is wrong: the account
+    /// is gone there, or it was never this server's. Signed out and forgotten, so that the monitor
+    /// does not try it again every round; the `account` event tells the UI.
+    fn forget_refused(&self, env: &EnvRef, at: &str, npid: &str) {
+        let _g = self.connect.lock().unwrap();
+        if host(env) != at || stored(env).is_none_or(|c| c.npid != npid) || edit_users(env, users::clear_account).is_err() {
+            return;
+        }
+        env.vault().delete(&vault::target(at, npid));
+        let _ = edit_remembered(env, |a| a.forget(at));
+        self.clear_friends(env);
+        env.log(
+            Msg::new("log.event.accountRefused", format!("Network: the server no longer accepts the account {npid}: signed out")).with("id", npid),
+        );
+        env.emit("account", serde_json::to_value(self.get_account(env)).unwrap_or(Value::Null));
     }
 
     pub fn update_profile(&self, env: &EnvRef, p: &ProfileUpdate) -> Res<Session> {
@@ -608,7 +689,14 @@ impl Account {
         if !wanted || !status.network {
             return;
         }
+        let tried = stored(env).map(|c| c.npid);
         if let Err(e) = self.ensure(env) {
+            if e.key == "backend.login_wrong" {
+                if let Some(npid) = tried {
+                    self.forget_refused(env, &host, &npid);
+                }
+                return;
+            }
             let mut i = self.inner.lock().unwrap();
             if e.code != "not_signed_in" && i.problem != e.message {
                 i.problem = e.message.clone();
@@ -632,6 +720,198 @@ impl Account {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::settings::Settings;
+    use std::collections::HashMap;
+    use std::path::PathBuf;
+
+    #[derive(Default)]
+    struct MemoryVault(Mutex<HashMap<String, String>>);
+
+    impl Vault for MemoryVault {
+        fn get(&self, target: &str) -> Option<String> {
+            self.0.lock().unwrap().get(target).cloned()
+        }
+        fn set(&self, target: &str, _: &str, secret: &str) -> Res<()> {
+            self.0.lock().unwrap().insert(target.into(), secret.into());
+            Ok(())
+        }
+        fn delete(&self, target: &str) {
+            self.0.lock().unwrap().remove(target);
+        }
+    }
+
+    struct TestEnv {
+        layout: Layout,
+        account: Account,
+        vault: MemoryVault,
+        events: Mutex<Vec<(String, Value)>>,
+    }
+
+    impl Env for TestEnv {
+        fn layout(&self) -> &Layout {
+            &self.layout
+        }
+        fn account(&self) -> &Account {
+            &self.account
+        }
+        fn emit(&self, event: &str, payload: Value) {
+            self.events.lock().unwrap().push((event.into(), payload));
+        }
+        fn log(&self, _: Msg) {}
+        fn client_version(&self) -> String {
+            "test".into()
+        }
+        fn vault(&self) -> &dyn Vault {
+            &self.vault
+        }
+    }
+
+    /// A data folder of its own, a Credential Manager in memory, no network.
+    struct Pc {
+        dir: PathBuf,
+        test: Arc<TestEnv>,
+        env: EnvRef,
+    }
+
+    impl Pc {
+        fn new(name: &str) -> Pc {
+            let dir = std::env::temp_dir().join(format!("fzh-account-{name}-{}", std::process::id()));
+            let _ = std::fs::remove_dir_all(&dir);
+            let none = PathBuf::from("missing");
+            let layout = Layout { data: dir.clone(), emulator: none.clone(), patches: none.clone(), licences: none.clone(), warmup_script: none };
+            let test = Arc::new(TestEnv { layout, account: Account::default(), vault: MemoryVault::default(), events: Mutex::default() });
+            Pc { dir, env: test.clone(), test }
+        }
+
+        /// As after a sign-in on `server`: `users.json` and the Credential Manager.
+        fn signed_in(&self, server: &str, npid: &str, password: &str) {
+            let c = Credentials { npid: npid.into(), password: password.into(), email: registered_email(npid) };
+            edit_users(&self.env, |v| users::set_account(v, &c)).unwrap();
+            self.test.vault.set(&vault::target(server, npid), npid, password).unwrap();
+        }
+
+        /// What `save_settings` does when the server changes.
+        fn go(&self, from: &str, to: &str) {
+            let settings = Settings { use_private_server: true, private_server: to.into(), ..Settings::default() };
+            let path = self.test.layout.settings_json();
+            self.test.account.change_server(&self.env, from, to, || store::save_settings(&path, &settings)).unwrap();
+        }
+
+        fn stored(&self) -> Option<(String, String)> {
+            credentials(&self.env).map(|c| (c.npid, c.password))
+        }
+    }
+
+    impl Drop for Pc {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.dir);
+        }
+    }
+
+    const A: &str = "a.example";
+    const B: &str = "b.example:40001:40002:40003:40004:40005";
+
+    fn account_of(id: &str, pw: &str) -> Option<(String, String)> {
+        Some((id.into(), pw.into()))
+    }
+
+    #[test]
+    fn each_server_keeps_its_account() {
+        let pc = Pc::new("switch");
+        pc.signed_in(A, "Synthetic_1", "pw-on-a");
+        pc.go(A, B);
+        assert_eq!(pc.stored(), None, "nothing remembered for B yet");
+        assert_eq!(pc.test.vault.get(&vault::target(A, "Synthetic_1")).as_deref(), Some("pw-on-a"));
+        pc.signed_in(B, "Other_2", "pw-on-b");
+        pc.go(B, A);
+        assert_eq!(pc.stored(), account_of("Synthetic_1", "pw-on-a"));
+        assert_eq!(pc.test.account.get_account(&pc.env).session.unwrap().online_id, "Synthetic_1");
+        pc.go(A, B);
+        assert_eq!(pc.stored(), account_of("Other_2", "pw-on-b"));
+        let text = std::fs::read_to_string(pc.test.layout.accounts_json()).unwrap();
+        assert!(text.contains("Synthetic_1") && !text.contains("pw-on-"), "no password in accounts.json");
+    }
+
+    #[test]
+    fn the_same_online_id_on_two_servers_has_two_passwords() {
+        let pc = Pc::new("same-id");
+        pc.signed_in(A, "Synthetic_1", "pw-on-a");
+        pc.go(A, B);
+        pc.signed_in(B, "Synthetic_1", "pw-on-b");
+        pc.go(B, A);
+        assert_eq!(pc.stored(), account_of("Synthetic_1", "pw-on-a"));
+        pc.go(A, B);
+        assert_eq!(pc.stored(), account_of("Synthetic_1", "pw-on-b"));
+    }
+
+    #[test]
+    fn signing_out_forgets_that_server_only() {
+        let pc = Pc::new("sign-out");
+        pc.signed_in(A, "Synthetic_1", "pw-on-a");
+        pc.go(A, B);
+        pc.signed_in(B, "Other_2", "pw-on-b");
+        pc.test.account.sign_out(&pc.env).unwrap();
+        assert_eq!(pc.test.vault.get(&vault::target(B, "Other_2")), None);
+        pc.go(B, A);
+        assert_eq!(pc.stored(), account_of("Synthetic_1", "pw-on-a"));
+        pc.test.account.sign_out(&pc.env).unwrap();
+        pc.go(A, B);
+        pc.go(B, A);
+        assert_eq!(pc.stored(), None);
+        assert!(pc.test.vault.0.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn an_account_from_before_the_credential_manager_is_kept_too() {
+        let pc = Pc::new("legacy");
+        let c = Credentials { npid: "Synthetic_1".into(), password: "pw-in-users-json".into(), email: "me@example.test".into() };
+        edit_users(&pc.env, |v| users::set_account(v, &c)).unwrap();
+        pc.go(A, B);
+        pc.go(B, A);
+        assert_eq!(stored(&pc.env), Some(c));
+    }
+
+    #[test]
+    fn a_remembered_account_without_its_password_means_signed_out() {
+        let pc = Pc::new("no-password");
+        pc.signed_in(A, "Synthetic_1", "pw-on-a");
+        pc.go(A, B);
+        pc.test.vault.delete(&vault::target(A, "Synthetic_1"));
+        pc.go(B, A);
+        assert_eq!(pc.stored(), None);
+        assert!(pc.test.account.get_account(&pc.env).session.is_none());
+    }
+
+    #[test]
+    fn a_refused_account_is_signed_out_once() {
+        let pc = Pc::new("refused");
+        pc.go(A, B);
+        pc.signed_in(B, "Synthetic_1", "pw-on-b");
+        let account = &pc.test.account;
+        account.forget_refused(&pc.env, B, "Other_2");
+        account.forget_refused(&pc.env, A, "Synthetic_1");
+        assert!(pc.stored().is_some(), "another account or another server: nothing happens");
+        account.forget_refused(&pc.env, B, "Synthetic_1");
+        assert_eq!(pc.stored(), None);
+        assert_eq!(pc.test.vault.get(&vault::target(B, "Synthetic_1")), None);
+        let events = pc.test.events.lock().unwrap();
+        let (name, payload) = events.last().unwrap();
+        assert_eq!((name.as_str(), &payload["session"]), ("account", &Value::Null));
+        drop(events);
+        pc.go(B, A);
+        pc.go(A, B);
+        assert_eq!(pc.stored(), None);
+    }
+
+    #[test]
+    fn the_server_does_not_change_while_the_game_runs() {
+        let pc = Pc::new("playing");
+        pc.signed_in(A, "Synthetic_1", "pw-on-a");
+        pc.test.account.suspend(&pc.env);
+        let e = pc.test.account.change_server(&pc.env, A, B, || panic!("settings must not be written")).unwrap_err();
+        assert_eq!(e.code, "game_running");
+        assert_eq!(pc.stored(), account_of("Synthetic_1", "pw-on-a"));
+    }
 
     #[test]
     fn placeholder_and_shapes() {

@@ -11,7 +11,7 @@ import "./styles.css";
 import { loadBackend, type Backend } from "./backend";
 import type { MockHooks } from "./backend.mock";
 import { setLang, t } from "./i18n";
-import { checkUpdate, loadPlan, prepare, showInvite, syncAvatar } from "./ui/actions";
+import { checkUpdate, loadPlan, prepare, showInvite, signedOut, syncAvatar } from "./ui/actions";
 import { esc, updateProgress } from "./ui/components";
 import { bindEvents, initialScreen } from "./ui/events";
 import { initTips } from "./ui/tips";
@@ -69,6 +69,12 @@ async function subscribe(backend: Backend): Promise<void> {
       app.friends = f;
       if (fresh.length) toast(t("toast.friendRequestReceived", { name: fresh.join(", ") }));
       render();
+    }),
+    backend.on("account", (a) => {
+      if (a.session || !PR.in) return;
+      signedOut();
+      toast(t("toast.accountRefused", { id: PR.id }), true);
+      refresh();
     }),
     backend.on("invite", showInvite),
     backend.on("hosting", (h) => {
