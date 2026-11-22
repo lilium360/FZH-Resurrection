@@ -65,10 +65,42 @@ fn info(app: &AppHandle, update: Option<&Update>) -> UpdateInfo {
     }
 }
 
-fn failure(app: &AppHandle, code: &'static str, key: &'static str, what: &str, e: &tauri_plugin_updater::Error) -> BackendError {
+/// One step of an update that can fail: the log line that carries the updater's own reason, and
+/// the plain message for the player.
+struct Step {
+    code: &'static str,
+    what: &'static str,
+    log_key: &'static str,
+    key: &'static str,
+    english: &'static str,
+}
+
+const CHECK: Step = Step {
+    code: "server_unreachable",
+    what: "Update check",
+    log_key: "log.event.updateCheckFailed",
+    key: "backend.update_check_failed",
+    english: "Could not check for updates. You can keep playing; try again later.",
+};
+const DOWNLOAD: Step = Step {
+    code: "server_unreachable",
+    what: "Update download",
+    log_key: "log.event.updateDownloadFailed",
+    key: "backend.update_download_failed",
+    english: "The update could not be downloaded or its signature did not match. Nothing was installed.",
+};
+const INSTALL: Step = Step {
+    code: "io",
+    what: "Update installation",
+    log_key: "log.event.updateInstallFailed",
+    key: "backend.update_install_failed",
+    english: "The update could not be installed. The current version is still running.",
+};
+
+fn failure(app: &AppHandle, step: &Step, e: &tauri_plugin_updater::Error) -> BackendError {
     let reason = e.to_string();
-    log(app, Msg::new(key, format!("{what} failed: {reason}")).with("reason", reason.as_str()));
-    BackendError::new(code, key, format!("{what} failed: {reason}")).with("reason", reason)
+    log(app, Msg::new(step.log_key, format!("{} failed: {reason}", step.what)).with("reason", reason));
+    BackendError::new(step.code, step.key, step.english)
 }
 
 /// Updating replaces the emulator too, and the installer closes the launcher.
@@ -102,8 +134,8 @@ pub async fn check(app: &AppHandle) -> Res<UpdateInfo> {
             _ => {}
         }
     }
-    let found = app.updater().map_err(|e| failure(app, "server_unreachable", "log.event.updateCheckFailed", "Update check", &e))?;
-    let found = found.check().await.map_err(|e| failure(app, "server_unreachable", "log.event.updateCheckFailed", "Update check", &e))?;
+    let found = app.updater().map_err(|e| failure(app, &CHECK, &e))?;
+    let found = found.check().await.map_err(|e| failure(app, &CHECK, &e))?;
     if let Some(u) = &found {
         log(app, Msg::new("log.event.updateFound", format!("Launcher {} available", u.version)).with("version", u.version.as_str()));
     }
@@ -154,7 +186,7 @@ pub async fn download(app: &AppHandle) -> Res<()> {
         }
         Err(e) => {
             *stage = Stage::Found(update);
-            Err(failure(app, "server_unreachable", "log.event.updateDownloadFailed", "Update download", &e))
+            Err(failure(app, &DOWNLOAD, &e))
         }
     }
 }
@@ -176,7 +208,7 @@ pub fn install(app: &AppHandle) -> Res<()> {
     match update.install(&bytes) {
         Ok(()) => app.restart(),
         Err(e) => {
-            let err = failure(app, "io", "log.event.updateInstallFailed", "Update installation", &e);
+            let err = failure(app, &INSTALL, &e);
             *stage = Stage::Ready(update, bytes);
             Err(err)
         }

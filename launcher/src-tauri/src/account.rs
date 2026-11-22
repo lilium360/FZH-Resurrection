@@ -537,9 +537,8 @@ impl Account {
         match result {
             Ok(Play::Granted(g)) => {
                 env.log(
-                    Msg::new("log.event.playGranted", format!("Network: the server lets {} play from {} for {} s", g.online_id, g.address, g.expires_in))
+                    Msg::new("log.event.playGranted", format!("Network: the server lets {} play for {} s", g.online_id, g.expires_in))
                         .with("id", g.online_id)
-                        .with("address", g.address)
                         .with("duration", error::seconds(g.expires_in)),
                 );
                 None
