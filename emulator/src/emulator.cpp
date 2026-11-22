@@ -120,12 +120,16 @@ std::map<s32, std::string> ExtractTrophies(const std::filesystem::path& npbind_p
     std::map<s32, std::string> trophy_index_map{};
 
     NPBindFile npbind;
-    if (!npbind.Load(npbind_path.string())) {
+    std::vector<std::string> np_comm_ids;
+    if (npbind.Load(npbind_path.string())) {
+        np_comm_ids = npbind.GetNpCommIds();
+    } else {
         LOG_WARNING(Common_Filesystem, "Failed to load npbind.dat file");
-        return trophy_index_map;
+        np_comm_ids = Core::KnownTitle::NpCommIds();
+        if (!np_comm_ids.empty()) {
+            LOG_INFO(Loader, "NP Communication ID of the known title: {}", np_comm_ids.front());
+        }
     }
-
-    auto np_comm_ids = npbind.GetNpCommIds();
     if (np_comm_ids.empty()) {
         LOG_WARNING(Common_Filesystem, "No NPCommIDs in npbind.dat");
         return trophy_index_map;
@@ -441,25 +445,7 @@ void Emulator::Run(std::filesystem::path file, std::vector<std::string> args,
     game_info.trophy_index_map = ExtractTrophies(npbind_path, trophy_dir);
 
     std::string game_title = fmt::format("{} - {} <{}>", id, title, app_version);
-    std::string window_title = "";
-    std::string remote_url(Common::g_scm_remote_url);
-    std::string remote_host = Common::GetRemoteNameFromLink();
-    if (Common::g_is_release) {
-        if (remote_host == "shadps4-emu" || remote_url.length() == 0) {
-            window_title = fmt::format("shadPS4 v{} | {}", Common::g_version, game_title);
-        } else {
-            window_title =
-                fmt::format("shadPS4 {}/v{} | {}", remote_host, Common::g_version, game_title);
-        }
-    } else {
-        if (remote_host == "shadps4-emu" || remote_url.length() == 0) {
-            window_title = fmt::format("shadPS4 v{} {} {} | {}", Common::g_version,
-                                       Common::g_scm_branch, Common::g_scm_desc, game_title);
-        } else {
-            window_title = fmt::format("shadPS4 v{} {}/{} {} | {}", Common::g_version, remote_host,
-                                       Common::g_scm_branch, Common::g_scm_desc, game_title);
-        }
-    }
+    std::string window_title = fmt::format("{} | {}", Common::GetVersionLabel(), game_title);
     window = std::make_unique<Frontend::WindowSDL>(EmulatorSettings.GetWindowWidth(),
                                                    EmulatorSettings.GetWindowHeight(), controllers,
                                                    window_title);

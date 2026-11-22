@@ -898,6 +898,14 @@ void Prepare() {
              SizeName(LastHeadsetLevel), EmulatorSettings.GetExtraDmemInMBytes());
 }
 
+std::vector<std::string> NpCommIds() {
+    // Firewall Zero Hour, European release.
+    if (Common::ElfInfo::Instance().GameSerial() == "CUSA11182") {
+        return {"NPWR14216_00"};
+    }
+    return {};
+}
+
 void OnGameLoaded(VAddr base, u64 size) {
     if (Common::ElfInfo::Instance().GameSerial() != "CUSA12392") {
         return;

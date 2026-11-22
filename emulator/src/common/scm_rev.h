@@ -19,4 +19,8 @@ extern const char g_scm_date[];
 
 const std::string GetRemoteNameFromLink();
 
+/// "shadPS4 v<version>", followed on builds that are not releases by the remote's owner, the
+/// branch and the commit, as far as they are known.
+std::string GetVersionLabel();
+
 } // namespace Common

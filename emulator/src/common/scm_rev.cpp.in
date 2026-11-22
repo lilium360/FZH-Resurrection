@@ -38,5 +38,28 @@ const std::string GetRemoteNameFromLink() {
     return remote_host;
 }
 
+std::string GetVersionLabel() {
+    const std::string remote_url(g_scm_remote_url);
+    const std::string remote_host = GetRemoteNameFromLink();
+    const bool official = remote_host == "shadps4-emu" || remote_url.empty();
+    if (g_is_release) {
+        return official ? std::string("shadPS4 v") + g_version
+                        : "shadPS4 " + remote_host + "/v" + g_version;
+    }
+    std::string label = std::string("shadPS4 v") + g_version;
+    std::string origin = official ? std::string() : remote_host;
+    const std::string branch(g_scm_branch);
+    if (!origin.empty() && !branch.empty()) {
+        origin += '/';
+    }
+    origin += branch;
+    for (const std::string& part : {origin, std::string(g_scm_desc)}) {
+        if (!part.empty()) {
+            label += ' ' + part;
+        }
+    }
+    return label;
+}
+
 } // namespace
 

@@ -170,9 +170,41 @@ endif()
 # generate git revision information
 include("${CMAKE_CURRENT_SOURCE_DIR}/externals/cmake-modules/GetGitRevisionDescription.cmake")
 get_git_head_revision(GIT_REF_SPEC GIT_REV)
-git_describe(GIT_DESC --always --long --dirty)
 git_branch_name(GIT_BRANCH)
 string(TIMESTAMP BUILD_DATE "%Y-%m-%d %H:%M:%S")
+
+# This tree is a folder of a larger repository: the revision is that repository's commit, and its
+# tags name launcher releases, so the description is the short commit and not `git describe`.
+# What git cannot tell stays empty.
+set(GIT_DESC "")
+find_package(Git QUIET)
+if (GIT_FOUND)
+  execute_process(
+    COMMAND "${GIT_EXECUTABLE}" rev-parse HEAD
+    WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+    OUTPUT_VARIABLE GIT_HEAD_HASH
+    RESULT_VARIABLE GIT_HEAD_RESULT
+    ERROR_QUIET
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+  )
+  if (GIT_HEAD_RESULT EQUAL 0)
+    set(GIT_REV "${GIT_HEAD_HASH}")
+    string(SUBSTRING "${GIT_HEAD_HASH}" 0 7 GIT_DESC)
+    execute_process(
+      COMMAND "${GIT_EXECUTABLE}" diff --quiet HEAD -- .
+      WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+      RESULT_VARIABLE GIT_DIRTY_RESULT
+      OUTPUT_QUIET
+      ERROR_QUIET
+    )
+    if (GIT_DIRTY_RESULT EQUAL 1)
+      string(APPEND GIT_DESC "-dirty")
+    endif()
+  endif()
+endif()
+if (NOT GIT_REV MATCHES "^[0-9a-f]+$")
+  set(GIT_REV "")
+endif()
 
 message("start git things")
 
@@ -262,6 +294,10 @@ execute_process(
   OUTPUT_VARIABLE GIT_REMOTE_URL
   OUTPUT_STRIP_TRAILING_WHITESPACE
 )
+
+if (GIT_BRANCH MATCHES "NOTFOUND$")
+  set(GIT_BRANCH "")
+endif()
 
 # Set Version
 set(EMULATOR_VERSION_MAJOR "0")

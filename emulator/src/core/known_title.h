@@ -3,6 +3,8 @@
 
 #pragma once
 
+#include <string>
+#include <vector>
 #include "common/types.h"
 
 namespace Core::Vr {
@@ -62,5 +64,10 @@ void Prepare();
 /// and its physics are made to take each step with the time step its bodies were moved for
 /// (SHADPS4_TITLE_PHYSICS_STEP=0 leaves them as the console has them).
 void OnGameLoaded(VAddr base, u64 size);
+
+/// The NP Communication IDs of the title as its sce_sys/npbind.dat lists them, for a game folder
+/// that came without that file: it is an encrypted entry of the PKG, which an extraction of the
+/// PKG's files alone leaves behind. Empty for a title that is not known.
+std::vector<std::string> NpCommIds();
 
 } // namespace Core::KnownTitle
