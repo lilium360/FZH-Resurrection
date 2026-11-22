@@ -3,17 +3,92 @@
 # (docs\releasing.md). Needs the update key committed as plugins.updater.pubkey, a clean tree
 # and the GitHub CLI (gh) signed in for -Publish.
 #
-#   $env:TAURI_SIGNING_PRIVATE_KEY = "$env:USERPROFILE\.tauri\fzh-resurrection.key"
 #   powershell -ExecutionPolicy Bypass -File tools\release.ps1 -Server <public server address>
 #              -Notes "First public release" [-Publish]
+#
+# The private key is TAURI_SIGNING_PRIVATE_KEY (a path or the key itself), else
+# %USERPROFILE%\.tauri\fzh-resurrection.key.
 #
 # -Server   compiled in as FZH_DEFAULT_SERVER (docs\building.md); it is written to no file
 # -Notes    one change per line; shown by the launcher under About > What's new
 # -Publish  tag v<version>, push it and create the release with the installer, its .sig and latest.json
-# The key's password is asked for unless TAURI_SIGNING_PRIVATE_KEY_PASSWORD is set.
-param([Parameter(Mandatory = $true)][string]$Server, [Parameter(Mandatory = $true)][string]$Notes,
-      [switch]$Publish)
+#
+# The key's password comes from TAURI_SIGNING_PRIVATE_KEY_PASSWORD, else from Windows Credential
+# Manager, else it is asked for. To keep it in Credential Manager (readable only by this Windows
+# user) or remove it from there:
+#
+#   powershell -ExecutionPolicy Bypass -File tools\release.ps1 -StorePassword
+#   powershell -ExecutionPolicy Bypass -File tools\release.ps1 -ForgetPassword
+param([Parameter(Mandatory = $true, ParameterSetName = 'Release')][string]$Server,
+      [Parameter(Mandatory = $true, ParameterSetName = 'Release')][string]$Notes,
+      [Parameter(ParameterSetName = 'Release')][switch]$Publish,
+      [Parameter(Mandatory = $true, ParameterSetName = 'Store')][switch]$StorePassword,
+      [Parameter(Mandatory = $true, ParameterSetName = 'Forget')][switch]$ForgetPassword)
 $ErrorActionPreference = 'Stop'
+
+$credential = 'FZH Resurrection/update-key'
+Add-Type -TypeDefinition @'
+using System;
+using System.Runtime.InteropServices;
+using System.Text;
+
+public static class FzhCredential {
+    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+    struct CREDENTIAL {
+        public int Flags; public int Type; public string TargetName; public string Comment; public long LastWritten;
+        public int CredentialBlobSize; public IntPtr CredentialBlob; public int Persist; public int AttributeCount;
+        public IntPtr Attributes; public string TargetAlias; public string UserName;
+    }
+    const int GENERIC = 1, LOCAL_MACHINE = 2;
+    [DllImport("advapi32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    static extern bool CredReadW(string target, int type, int flags, out IntPtr credential);
+    [DllImport("advapi32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    static extern bool CredWriteW(ref CREDENTIAL credential, int flags);
+    [DllImport("advapi32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    static extern bool CredDeleteW(string target, int type, int flags);
+    [DllImport("advapi32.dll")]
+    static extern void CredFree(IntPtr credential);
+
+    public static string Read(string target) {
+        IntPtr p;
+        if (!CredReadW(target, GENERIC, 0, out p)) return null;
+        try {
+            var c = (CREDENTIAL)Marshal.PtrToStructure(p, typeof(CREDENTIAL));
+            var blob = new byte[c.CredentialBlobSize];
+            Marshal.Copy(c.CredentialBlob, blob, 0, blob.Length);
+            return Encoding.Unicode.GetString(blob);
+        } finally { CredFree(p); }
+    }
+    public static void Write(string target, string secret) {
+        var blob = Encoding.Unicode.GetBytes(secret);
+        var c = new CREDENTIAL { Type = GENERIC, TargetName = target, UserName = "update key", Persist = LOCAL_MACHINE,
+                                 CredentialBlobSize = blob.Length, CredentialBlob = Marshal.AllocHGlobal(blob.Length) };
+        try {
+            Marshal.Copy(blob, 0, c.CredentialBlob, blob.Length);
+            if (!CredWriteW(ref c, 0)) throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error());
+        } finally { Marshal.FreeHGlobal(c.CredentialBlob); }
+    }
+    public static bool Delete(string target) { return CredDeleteW(target, GENERIC, 0); }
+}
+'@
+
+function Read-Password {
+    $secure = Read-Host 'Password of the update key' -AsSecureString
+    $bstr = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($secure)
+    try { [Runtime.InteropServices.Marshal]::PtrToStringBSTR($bstr) } finally { [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($bstr) }
+}
+
+if ($StorePassword) {
+    $typed = Read-Password
+    if (-not $typed) { throw 'No password typed: nothing stored' }
+    [FzhCredential]::Write($credential, $typed)
+    Write-Host "Stored in Windows Credential Manager as '$credential'."
+    exit 0
+}
+if ($ForgetPassword) {
+    if ([FzhCredential]::Delete($credential)) { Write-Host "Removed '$credential' from Windows Credential Manager." } else { Write-Host "Nothing stored as '$credential'." }
+    exit 0
+}
 
 $repo = Split-Path -Parent $PSScriptRoot
 $launcher = Join-Path $repo 'launcher'
@@ -22,7 +97,11 @@ $version = $conf.version
 $tag = "v$version"
 
 if ($conf.plugins.updater.pubkey -eq 'UPDATER-PUBLIC-KEY-NOT-SET') { throw 'No update key: see "Signing key" in docs\releasing.md' }
-if (-not $env:TAURI_SIGNING_PRIVATE_KEY) { throw 'Set TAURI_SIGNING_PRIVATE_KEY to the path of the private key' }
+if (-not $env:TAURI_SIGNING_PRIVATE_KEY) {
+    $key = Join-Path $env:USERPROFILE '.tauri\fzh-resurrection.key'
+    if (-not (Test-Path $key)) { throw "Set TAURI_SIGNING_PRIVATE_KEY to the path of the private key (not found: $key)" }
+    $env:TAURI_SIGNING_PRIVATE_KEY = $key
+}
 foreach ($file in 'package.json', 'src-tauri\Cargo.toml') {
     if (-not (Select-String -Path (Join-Path $launcher $file) -Pattern "^\s*`"?version`"?\s*[:=]\s*`"$([regex]::Escape($version))`"" -Quiet)) {
         throw "launcher\$file is not at version $version"
@@ -33,9 +112,8 @@ if (git -C $repo tag --list $tag) { throw "Tag $tag exists: raise the version fi
 
 $typed = $false
 if (-not $env:TAURI_SIGNING_PRIVATE_KEY_PASSWORD) {
-    $secure = Read-Host 'Password of the update key' -AsSecureString
-    $env:TAURI_SIGNING_PRIVATE_KEY_PASSWORD = [Runtime.InteropServices.Marshal]::PtrToStringAuto(
-        [Runtime.InteropServices.Marshal]::SecureStringToBSTR($secure))
+    $stored = [FzhCredential]::Read($credential)
+    $env:TAURI_SIGNING_PRIVATE_KEY_PASSWORD = if ($stored) { $stored } else { Read-Password }
     $typed = $true
 }
 $env:FZH_DEFAULT_SERVER = $Server

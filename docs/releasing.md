@@ -34,8 +34,14 @@ $env:TAURI_SIGNING_PRIVATE_KEY = "$env:USERPROFILE\.tauri\fzh-resurrection.key"
 powershell -ExecutionPolicy Bypass -File tools\release.ps1 -Server <public server address> -Notes "First public release" -Publish
 ```
 
-It asks for the key's password, which stays out of the command history. Without `-Publish` it
-stops after writing the installer, its `.sig` and `latest.json` in
+The key is `TAURI_SIGNING_PRIVATE_KEY`, else `%USERPROFILE%\.tauri\fzh-resurrection.key`. The
+password is `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`, else the one kept in Windows Credential Manager,
+else the script asks for it, which keeps it out of the command history. `-StorePassword` asks
+for the password once and keeps it in Credential Manager as `FZH Resurrection/update-key`,
+readable only by this Windows user; `-ForgetPassword` removes it. Whoever can run programs as
+that user can then sign an update: store it only on a PC you trust.
+
+Without `-Publish` the script stops after writing the installer, its `.sig` and `latest.json` in
 `launcher/src-tauri/target/release/bundle/nsis/`.
 
 ## Building a release
