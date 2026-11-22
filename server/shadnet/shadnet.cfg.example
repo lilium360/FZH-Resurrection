@@ -1,0 +1,30 @@
+# shadNet configuration, as server/docker/install.sh and server/bare/install.sh write it.
+# shadNet adds every missing key with its default on the first start.
+[General]
+# Address shadNet listens on.
+Host=0.0.0.0
+# TCP port of the binary protocol the emulator and the launcher speak.
+UnsecuredPort=31313
+# UDP port for matching (STUN); the emulator assumes TCP port + 1 unless SHADPS4_SHADNET_UDP_PORT says otherwise.
+MatchingUdpPort=31314
+# TCP port of the WebAPI, used by the emulator and by the backend to check avatar upload tokens.
+WebApiPort=31315
+# Lobbies and matchmaking; the game's online modes need it.
+Matching2Enabled=true
+# Most players online in Matching2 at once; 0 = no limit.
+Matching2MaxUsers=0
+# Trophy synchronisation.
+TrophiesEnabled=true
+# Separate stats service; not used by this project.
+StatsEnabled=false
+# Member and admin HTTP APIs; keep them off on a public server.
+MemberApiEnabled=false
+AdminApiEnabled=false
+# Whether a new account needs its email confirmed; nothing here sends mail.
+EmailValidated=false
+# Log file in the working folder, rotated at this size.
+LogFile=shadnet.log
+LogMaxSizeMB=10
+# Accounts can only be created with this key (the launcher's "invite code"). The install scripts
+# generate it; never commit a real one.
+RegistrationSecretKey=change-me

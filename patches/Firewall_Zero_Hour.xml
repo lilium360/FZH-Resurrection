@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Patch>
+  <!-- The game sets vr.PixelDensity from code (1.4 in the menus, lower in matches), overriding the
+       value chosen in the settings. The function that does it (vaddr 0x359BB80) returns at once,
+       so the value the launcher puts in the mod pak holds. -->
+  <Metadata Title="Firewall Zero Hour" Name="Free pixel density" Note="resolution chosen by the player" Author="fzh" PatchVer="1.0" AppVer="01.43" AppElf="eboot.bin" isEnabled="true">
+    <PatchList>
+      <Line Type="bytes" Address="0x0399BB80" Value="C3"/>
+    </PatchList>
+  </Metadata>
+  <!-- AFCChaperone shows the FACE CAMERA widget when dot(camera forward, chaperone forward) is
+       below TurnAroundThreshold (vaddr 0x35FBE65: jae to the branch that hides it). The patch makes
+       that jump unconditional. Off here; the launcher's "Turn freely" mod switches isEnabled. -->
+  <Metadata Title="Firewall Zero Hour" Name="No turn-around warning" Note="optional, set by the launcher" Author="fzh" PatchVer="1.0" AppVer="01.43" AppElf="eboot.bin" isEnabled="false">
+    <PatchList>
+      <Line Type="bytes" Address="0x039FBE65" Value="E98700000090"/>
+    </PatchList>
+  </Metadata>
+</Patch>

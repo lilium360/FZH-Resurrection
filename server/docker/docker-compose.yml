@@ -1,0 +1,93 @@
+# The three online services of Firewall Zero Hour. Use them through the scripts in this folder
+# (install.sh, status.sh, update.sh, stop.sh, create-account.sh).
+#
+#   shadnet  PSN replacement: TCP 31313 (game), UDP 31314 (matching), TCP 31315 (WebAPI)
+#   backend  player progression, avatars, account registration: TCP 1338
+#   relay    player-to-player traffic when a direct connection fails: UDP 31316
+#
+# Persistent data lives in FZH_DATA on the host (.env, default /srv/fzh).
+name: fzh
+
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: "5m"
+    max-file: "3"
+
+x-python: &python
+  context: ..
+  dockerfile_inline: |
+    FROM python:3.13-alpine
+    COPY backend/backend.py backend/shadnet_client.py relay/relay.py account/create_account.py /app/
+    USER 10001:10001
+
+services:
+  shadnet:
+    build:
+      context: ../shadnet
+    restart: unless-stopped
+    ports:
+      - "31313:31313/tcp"
+      - "31314:31314/udp"
+      - "31315:31315/tcp"
+    volumes:
+      - ${FZH_DATA:-/srv/fzh}/shadnet:/data
+    healthcheck:
+      # Port 31313 (hex 7A51) listening, read from /proc so shadNet's log stays clean.
+      test: ["CMD-SHELL", "cat /proc/net/tcp /proc/net/tcp6 2>/dev/null | grep -Eqi ':7A51 [0-9A-F:]+ 0A '"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    logging: *logging
+
+  backend:
+    build: *python
+    restart: unless-stopped
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    command: ["python", "-u", "/app/backend.py", "--host", "0.0.0.0", "--port", "1338",
+              "--data", "/data/backend-data.json", "--log", "/data/backend-requests.log",
+              "--shadnet-webapi", "http://shadnet:31315", "--shadnet-game", "shadnet:31313",
+              "--registration-key-file", "/keys/registration-key.txt"]
+    # Settings from .env (see .env.example); empty means the backend's default.
+    environment:
+      FZH_GAME_LOGIN: ${FZH_GAME_LOGIN:-}
+      FZH_SESSION_HOURS: ${FZH_SESSION_HOURS:-}
+      FZH_REGISTER_PER_DAY: ${FZH_REGISTER_PER_DAY:-}
+      FZH_REGISTER_COOLDOWN: ${FZH_REGISTER_COOLDOWN:-}
+      FZH_REGISTER_GLOBAL_PER_HOUR: ${FZH_REGISTER_GLOBAL_PER_HOUR:-}
+      FZH_RESERVED_NAMES: ${FZH_RESERVED_NAMES:-}
+      FZH_TRUSTED_PROXY_HEADER: ${FZH_TRUSTED_PROXY_HEADER:-}
+      FZH_TRUSTED_PROXIES: ${FZH_TRUSTED_PROXIES:-}
+    ports:
+      - "1338:1338/tcp"
+    volumes:
+      - ${FZH_DATA:-/srv/fzh}/backend:/data
+      - ${FZH_DATA:-/srv/fzh}/registration-key.txt:/keys/registration-key.txt:ro
+    healthcheck:
+      test: ["CMD", "python", "-c", "import socket; socket.create_connection(('127.0.0.1', 1338), 3)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+    logging: *logging
+
+  relay:
+    build: *python
+    restart: unless-stopped
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    command: ["python", "-u", "/app/relay.py", "--host", "0.0.0.0", "--port", "31316"]
+    ports:
+      - "31316:31316/udp"
+    healthcheck:
+      # An empty registration: the relay confirms it without counting it.
+      test: ["CMD", "python", "-c", "import socket; s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM); s.settimeout(3); s.sendto(b'FZR1\\x01\\x00', ('127.0.0.1', 31316)); assert s.recvfrom(64)[0][:5] == b'FZR1\\x02'"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+    logging: *logging
