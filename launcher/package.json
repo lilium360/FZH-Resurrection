@@ -1,0 +1,26 @@
+{
+  "name": "fzh-launcher",
+  "private": true,
+  "license": "GPL-2.0-or-later",
+  "version": "0.1.2",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit",
+    "test": "node --test tests/i18n.test.mjs tests/art.test.mjs",
+    "check:i18n": "node scripts/check-i18n.mjs",
+    "tauri": "tauri"
+  },
+  "dependencies": {
+    "@fontsource/barlow": "^5.2.5",
+    "@fontsource/lekton": "^5.2.5",
+    "@tauri-apps/api": "^2.5.0"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2.12.6",
+    "typescript": "~5.8.3",
+    "vite": "^6.3.5"
+  }
+}

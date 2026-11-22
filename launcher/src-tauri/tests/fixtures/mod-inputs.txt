@@ -1,0 +1,8 @@
+vr.PixelDensity=2.0
+r.ShadowQuality=5
+[/Script/MorpheusEditor.MorpheusRuntimeSettings]PSVRFrameSequence=Render90Scanout90
+[/Script/Engine.Engine]SmoothedFrameRateRange=(LowerBound=(Type=Inclusive,Value=22.000000),UpperBound=(Type=Exclusive,Value=240.000000))
+r.NumBufferedOcclusionQueries=2
+r.MaxAnisotropy=16
+r.DefaultFeature.AntiAliasing=2
+--server=203.0.113.50
