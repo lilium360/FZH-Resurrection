@@ -78,8 +78,8 @@ The link behind About > Source code and in `licences/README.txt` is fixed to
 https://github.com/lilium360/FZH-Resurrection (`src-tauri/src/commands.rs`,
 `scripts/bundle-emulator.mjs`).
 
-For example the current public test server, which will change:
-`sg-sgp08.altare.global:25885:25923:25923:25231:25885`.
+For example a server on a host that assigns its own ports:
+`play.example:40001:40002:40002:40003:40001`.
 
 The bundled resources also include `patches/*.xml` and `tools/input/warmup.txt`
 (`src-tauri/tauri.conf.json`).
