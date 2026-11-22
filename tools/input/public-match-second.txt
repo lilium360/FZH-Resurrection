@@ -1,0 +1,6 @@
+# As public-match-first.txt, but PUBLIC is chosen later, so this second instance finds the first one's room.
+1 0.2 worn=1
+45 12 padrot=0,-11,0
+50 0.4 r2 padrot=0,-11,0
+80 140 padrot=-13,4.5,0
+135 0.4 r2 padrot=-13,4.5,0

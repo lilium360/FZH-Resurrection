@@ -1,0 +1,6 @@
+# Guest: LOGIN, then wait in the main menu. Run with SHADPS4_DBG_INVITE_AUTO=<s> so the
+# invitation prompt is accepted on its own.
+1 0.2 worn=1
+45 12 padrot=0,-11,0
+50 0.4 r2 padrot=0,-11,0
+60 300 padrot=0,0,0

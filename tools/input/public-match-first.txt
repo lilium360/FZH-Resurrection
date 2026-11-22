@@ -1,0 +1,6 @@
+# LOGIN, then TRAINING > PUBLIC (yaw -13, pitch 4.5) and R2. First instance of a public match pair.
+1 0.2 worn=1
+45 12 padrot=0,-11,0
+50 0.4 r2 padrot=0,-11,0
+80 100 padrot=-13,4.5,0
+88 0.4 r2 padrot=-13,4.5,0

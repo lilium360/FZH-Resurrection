@@ -25,6 +25,6 @@ EmailValidated=false
 # Log file in the working folder, rotated at this size.
 LogFile=shadnet.log
 LogMaxSizeMB=10
-# Accounts can only be created with this key (the launcher's "invite code"). The install scripts
-# generate it; never commit a real one.
+# Accounts can only be created with this key. Only the backend uses it, to register players; the
+# install scripts generate it. Never commit a real one.
 RegistrationSecretKey=change-me

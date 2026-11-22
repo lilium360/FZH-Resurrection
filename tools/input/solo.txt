@@ -1,0 +1,6 @@
+# LOGIN, then TRAINING > SOLO (yaw -13, pitch 11): needs no network and lets you pick the map.
+1 0.2 worn=1
+45 12 padrot=0,-11,0
+50 0.4 r2 padrot=0,-11,0
+80 12 padrot=-13,11,0
+88 0.4 r2 padrot=-13,11,0

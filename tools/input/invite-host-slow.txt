@@ -1,0 +1,11 @@
+# Host, slower start (two instances on one PC): LOGIN, TRAINING > PRIVATE (yaw -13, pitch 9), then INVITE in the lobby (yaw 24, pitch -18).
+# The pad stays still until the lobby has loaded: the game takes the pad's pose at that moment as
+# its reference, so INVITE is only at (24,-18) if the lobby loaded with the pad at (-13,9).
+# Run with SHADPS4_DBG_INVITE_AUTO=<s> so the invitation dialog picks the first friend and sends.
+1 0.2 worn=1
+120 12 padrot=0,-11,0
+125 0.4 r2 padrot=0,-11,0
+155 50 padrot=-13,9,0
+163 0.4 r2 padrot=-13,9,0
+205 200 padrot=24,-18,0
+211 0.4 r2 padrot=24,-18,0

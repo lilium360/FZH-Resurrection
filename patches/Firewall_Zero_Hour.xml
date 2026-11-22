@@ -10,7 +10,7 @@
   </Metadata>
   <!-- AFCChaperone shows the FACE CAMERA widget when dot(camera forward, chaperone forward) is
        below TurnAroundThreshold (vaddr 0x35FBE65: jae to the branch that hides it). The patch makes
-       that jump unconditional. Off here; the launcher's "Turn freely" mod switches isEnabled. -->
+       that jump unconditional. Off here; the launcher's "Disable the FACE CAMERA warning" mod switches isEnabled. -->
   <Metadata Title="Firewall Zero Hour" Name="No turn-around warning" Note="optional, set by the launcher" Author="fzh" PatchVer="1.0" AppVer="01.43" AppElf="eboot.bin" isEnabled="false">
     <PatchList>
       <Line Type="bytes" Address="0x039FBE65" Value="E98700000090"/>

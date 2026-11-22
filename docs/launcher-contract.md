@@ -1,0 +1,446 @@
+# Launcher contract
+
+This is the contract between the launcher's TypeScript front end (`src/backend.ts`, the `Backend` interface) and its Rust/Tauri side (`src-tauri/`): commands, events, files on disk, settings, launch steps. Paths such as `src/...` and `src-tauri/...` are relative to `launcher/`.
+
+The front end talks to the outside world only through `Backend`. Two implementations exist:
+
+- `src/backend.tauri.ts`: every method is one Tauri command, called with `invoke`; events are received with `listen`.
+- `src/backend.mock.ts`: simulated behaviour, used in a plain browser.
+
+`loadBackend` picks the Tauri backend when `window.__TAURI_INTERNALS__` exists, otherwise the mock. `?backend=mock` forces the mock inside Tauri too.
+
+## Conventions
+
+- Command names are snake_case. Arguments are sent as camelCase JSON keys (Tauri 2 maps them to the snake_case parameters of the Rust function, e.g. `onlineId` -> `online_id`).
+- Results are JSON with camelCase fields, exactly the TypeScript types in `src/backend.ts` (`#[serde(rename_all = "camelCase")]`).
+- Errors: `Err({ "code": <BackendErrorCode>, "key": <i18n key>, "params": {...}, "message": <English> })` (`BackendError` in `error.rs`). `code` is the category the UI may branch on. `key` names the text in `copy/en.json` / `copy/it.json` (e.g. `backend.install_no_space`, `dump.holdsBase`) and `params` its placeholders; the UI shows `t(key, params)` in the launcher language. `message` is the English text for `launcher.log`, the problem report and the UI's fallback when the key is unknown. `params` is left out when empty. Codes: `invalid_input`, `not_found`, `already_exists`, `already_friend`, `blocked`, `wrong_password`, `already_signed_in`, `unauthorized`, `not_signed_in`, `server_unreachable`, `game_running`, `game_not_ready`, `busy`, `unsupported`, `io`, `internal`.
+- Texts for the player (`Msg` in `error.rs` and `src/i18n/core.ts`): `{key, params, message}` as above, used for errors, log lines, `FolderCheck.found/error/note` and `InstallPlan.error`. An empty `key` means "show `message` as it is" (names, paths, emulator output). A parameter value is a string or number, or one of: a nested text `{key, params, message}` (e.g. `{server}` = `{key:"server.official"}`, `{noun}` = `{key:"dump.noun.folder"}`), `{bytes: n}` (a size, shown as `40,1 GB` in Italian), `{seconds: n}` (a duration), `{list: [text, ...]}` (joined with ", "). Rust never formats a size or a sentence for the UI; the front end formats numbers per language.
+- Launcher languages: English and Italian (`copy/en.json`, `copy/it.json`, imported by `src/i18n/index.ts` at build time). `t(key, params)` supports placeholders, plural objects `{one, other}` chosen by `count`, and HTML escaping in `th`. A missing key shows `⟦key⟧` in development and the English text in a release. The UI language follows the edited setting at once. `npm test` checks the translator and the parity of bundle keys and placeholders; `npm run check:i18n` checks that keys used in `src/` and `src-tauri/src/` exist in both bundles, finds English left in `src/ui`, and lists unused keys.
+- Dialog titles of native pickers come from the front end in the launcher language (`pick_folder` `title`, `save_problem_report` `title`).
+- Events are emitted to all windows with `app.emit(name, payload)`.
+- Paths written as `<data>` are the launcher data folder (Layout, below).
+
+## Status
+
+Implemented in `src-tauri/`: every command except those listed below as `unsupported`; every event except `hosting`, which is never emitted.
+
+Answer `unsupported`, each with its control disabled or never shown:
+
+| Command | UI |
+|---|---|
+| `start_hosting`, `stop_hosting` | "Host on this PC" switch disabled. |
+| `set_recovery_email` | Row hidden (`SHOW_EMAIL` in `ui/screens.ts`). |
+| `update_profile` with a new Online ID | Field disabled. |
+
+Other answers that are fixed:
+
+- `get_hosting` answers "not running".
+- `AppInfo.hosting` is `false` in the Rust build (`true` in the mock, which simulates the hosting flow). With `hosting: false` the Host on this PC switch is disabled and the Advanced screen shows the private server's status (from `server-status`) instead of three local service cards.
+
+The official server's address is never shown in the UI, in toasts or in log lines: messages say "the official server" (`settings::server_name()`, `shadnet::net_error`), and a private server is named with the address the player typed. `ServerStatus.region` and `AppInfo.defaultServer` still carry the address to the front end, which does not render them. The problem report does contain it.
+
+Source files in `src-tauri/src/`:
+
+| File | What |
+|---|---|
+| `lib.rs` | Setup, state, `log` helper, command registration. |
+| `commands.rs` | All commands. |
+| `settings.rs` | Settings validation, emulator environment, pak inputs. |
+| `store.rs` | Atomic JSON reads and writes of `settings.json` and `launcher.json`. |
+| `layout.rs` | Paths and development overrides. |
+| `sfo.rs`, `dump.rs` | `param.sfo` reader; folder and PKG detection and validation. |
+| `pak.rs`, `modpak.rs` | Pak reader and writer; the mod pak. |
+| `pfs.rs`, `install.rs` | PKG/PFS reader; installation plan, extraction, records, deletion. |
+| `files.rs`, `instance.rs` | Game layout and preparation; emulator instance configuration and patches. |
+| `game.rs` | Process launch, log tail and milestones, job object for the warm-up emulator (`game::Owned`). |
+| `warmup.rs` | Shader cache warm-up thread. |
+| `update.rs` | Launcher updates through the Tauri updater plugin (check, download, install). |
+| `audio.rs`, `report.rs`, `avatar.rs`, `clock.rs` | Audio device names; problem report; avatar checks, data URLs and the HTTP PUT; time. |
+| `account.rs`, `users.rs` | Session service behind an `Env` trait (so a test can drive it without Tauri): registration, sign-in with a recovery code, friends, the play grant; `users.json` edit. |
+| `recovery.rs`, `vault.rs`, `backend_api.rs` | Recovery code (generation, canonical form, password derivation); the Credential Manager copy of the password; the backend's account API over HTTP (Backend account API). |
+| `shadnet/` | `packet.rs` framing, `proto.rs` hand-written protobuf, `connection.rs` TCP connection with a reader thread, `friends.rs` friends list, `mod.rs` commands and error messages. |
+
+Tests: `cargo test` covers the pure parts. `tests/fixtures/reference.pak` (plain pak of `tests/fixtures/pak-src`) and `tests/fixtures/mod-reference.pak` (mod pak for `tests/fixtures/mod-inputs.txt`) are golden files written by `tools/modpak.py`, the Python reference implementation of the mod pak; the Rust output must match them byte for byte. The `GetAuthorizationCode` request and reply are checked byte for byte against the header of shadNet's `protocol.md` and the payload `CmdGetAuthorizationCode` reads (`cmd_account.cpp`, shadNet b38cf175). HMAC-SHA256 and XTS are tested against RFC 4231 and IEEE 1619 vectors, the password derivation against the test vector of Backend account API. `backend_api.rs` maps every error code of the account API and talks to a fake backend. `tests/live_shadnet.rs` (ignored by default) runs several launcher account services (one data folder, one "PC" each) against a real, throwaway shadNet server and `server/backend/backend.py` pointed at it: registration, sign-in with the code, recovery on a second PC, the play grant and the game's login with and without it, friends, avatars, invitations. It writes and deletes Credential Manager entries; its header says how to run it. `tests/live_pkg.rs` (ignored by default) extracts real PKG files with the launcher's code; its header lists the environment variables.
+
+Protobuf: no crate. The launcher sends 6 messages (`LoginRequest` npid/password, `GetAuthorizationCodeRequest`, `FriendCommandRequest`, `SetClientVersionRequest`, empty `Terminate` and `GetToken`) and reads 8 (`LoginReply` with `FriendEntry`, `GetTokenReply`, `GetAuthorizationCodeReply`, the four friend notifications, `NotifyClientRejected`), all strings, bools and varints. It never sends `Create (2)`: accounts are registered through the backend. TCP keep-alive (`socket2`) notices a server that has vanished.
+
+## Layout
+
+`<data>` = `%LOCALAPPDATA%\com.fzh-resurrection.launcher` (the Tauri identifier).
+
+| Path | What |
+|---|---|
+| `<resources>\emulator\shadps4.exe` | Bundled emulator, with the Visual C++ runtime DLLs it imports next to it (`msvcp140.dll`, `msvcp140_2.dll`, `msvcp140_atomic_wait.dll`, `vcruntime140.dll`, `vcruntime140_1.dll`), so no VC++ redistributable is needed. `commit.txt` gives `emulatorCommit` ("unknown" without it). |
+| `<resources>\licences\` | `README.txt` (index, emulator commit, the source URL https://github.com/lilium360/FZH-Resurrection), the project's `LICENSE.txt` and `THIRD-PARTY-NOTICES.md` (Tauri, the fonts and the other components, so About does not list them), `emulator\` (GPL-2.0 `LICENSE.txt`, its own `THIRD-PARTY-NOTICES.md` when the emulator tree has one, `LICENSES\`, `externals\<component>\` licence files of the source tree), `launcher\fonts\`. |
+| `<resources>\patches\*.xml` | Emulator patches, bundled from `patches/` by `tauri.conf.json` (the game's patch file is `patches/Firewall_Zero_Hour.xml`). |
+| `<resources>\input\warmup.txt` | The warm-up input script, `tools/input/warmup.txt` bundled by `tauri.conf.json`. |
+| `<data>\launcher.json` | `setupCompleted`, chosen folders (`base`, `update` as `DumpInfo`; the same folder twice for a merged dump; a `.pkg` path with `source: "pkg"`), `prepared` (read also as the old `patched`), `modPakInputs`, `installLocation` (null = the default next to the PKG files), `installs` (every folder the launcher extracted PKG files into: `target`, `basePkg`, `updatePkg`, `files` = the relative paths it writes, `complete`). |
+| `<PKG folder>\FZH Resurrection\CUSA11182` | Default place of a game extracted from PKG files: a subfolder next to the base PKG file (next to the update's when only the update is a PKG file, then named `CUSA11182-patch`). The player can choose another parent folder with Change.... The PKG files themselves are only read. |
+| `<data>\settings.json` | `Settings`. |
+| `<data>\game\CUSA11182` | NTFS junction to the base dump (or to a merged folder). |
+| `<data>\game\CUSA11182-UPDATE` | NTFS junction to the update dump; absent when the base slot holds a merged folder. |
+| `<data>\game\CUSA11182-mods\firewall\content\paks\zz-fzh-mod_P.pak` | The generated mod pak. |
+| `<data>\run\user\` | Emulator instance (working directory `<data>\run`, portable `user\`). |
+| `<data>\run\user\users.json` | The signed-in shadNet account (player 1), password in plain text, because the emulator reads it there (Account storage, below). |
+| Windows Credential Manager, generic credential `FZH Resurrection/<host>:<game port>/<online id in lower case>` | The launcher's own copy of the account password (user name = the Online ID, persistence "local machine"; `vault.rs`). Written at registration and sign-in, deleted at sign-out and when another account is stored; when present it wins over `users.json`, which the launcher rewrites from it before each launch. The recovery code is stored nowhere. |
+| `<data>\run\user\log\shad_log.txt` | The emulator's log; the previous run's is renamed `shad_log.previous.txt` at launch. |
+| `<data>\run\user\cache\CUSA11182` | The emulator's shader (pipeline) cache. |
+| `<data>\account.json` | Launcher-only: `lastOnlineId`, `avatar` (colour index 0-4), `image` (true: the player's own picture is the chosen avatar). No password. |
+| `<data>\avatar.png` | The player's own picture, 256x256 PNG as the UI made it; absent when there is none. |
+| `<data>\cache\game-art.png` | Cached copy of the game's key art (`get_game_art`). |
+| `<data>\logs\launcher.log` | Every `log` event line. `last-launch.txt`: working directory, command line and environment of the last launch. |
+
+Development overrides, environment variables first, then `<data>\dev.json` (keys `emulator` and `patches`):
+
+| Override | What |
+|---|---|
+| `FZH_DATA_DIR` | The data folder. |
+| `FZH_EMULATOR` / `"emulator"` | A `shadps4.exe` outside the bundle, e.g. `emulator\build\win\shadps4.exe`. |
+| `FZH_PATCHES` / `"patches"` | A patch folder instead of the bundled one. |
+| `FZH_WARMUP_SCRIPT` | Another warm-up input script, e.g. a short one for tests. |
+
+## Build and installer
+
+`npm run tauri build` runs `npm run build`, then `scripts/bundle-emulator.mjs`, which fills `src-tauri/bundle/` (git-ignored; `build.rs` creates the empty folders so `cargo test` works without it):
+
+- `emulator\`: `shadps4.exe` from `emulator/build/win` (`FZH_EMULATOR_BUILD`); the Visual C++ runtime DLLs named in its import table, copied from the newest local Visual Studio `VC\Redist\MSVC\<version>\x64\Microsoft.VC14x.CRT` (`FZH_VC_CRT`); `commit.txt` = `git rev-parse HEAD` of the emulator source (`FZH_EMULATOR_SOURCE`), with `-dirty` appended when tracked files have changes.
+- `licences\`: as in Layout.
+
+Nothing else of the build folder is bundled (no `.map`, `.lib`, ninja or CMake files, logs or game data).
+
+Build-time values (environment variables of the build, read with `option_env!`):
+
+| Variable | Default | What |
+|---|---|---|
+| `FZH_DEFAULT_SERVER` | `127.0.0.1` | The server address when "private server" is off (`Settings.server()`, `AppInfo.defaultServer`), in the format of a server address (Settings). An address that does not parse falls back to the default. |
+
+Example: `set FZH_DEFAULT_SERVER=203.0.113.10` then `npm run tauri build`.
+
+Installer: NSIS, `installMode: currentUser` (no administrator rights; default folder `%LOCALAPPDATA%\FZH Resurrection`), product name `FZH Resurrection` (the file-system-safe form; the window title is "FZH:Resurrection"). Silent install: `setup.exe /S /D=<folder>`. It holds no game files, no account data and no keys: the data folder is created at the first start. The window is 1200x800 (also the minimum), with a native title bar and a dark theme; Windows clamps it on a smaller screen.
+
+Windows Firewall: the emulator binds UDP 3658 (and other UDP ports) on 0.0.0.0. Without an allow rule, unsolicited inbound UDP from peers is blocked. A per-user installer cannot add a firewall rule (that needs an elevated, per-machine install), so the launcher does not add one: the Game screen tells the player to choose Allow when Windows asks (at least private networks). If the player cancels the prompt, Windows adds block rules and peers cannot reach that player directly; whether the relay (UDP 31316, which the emulator reaches outbound) then carries the match is not verified. When the prompt appears (probably when the game first listens in a lobby or match, not at the main menu) is not verified either.
+
+## Events
+
+| Event | Payload | When |
+|---|---|---|
+| `log` | `LogLine {time: "HH:MM:SS", line, key?, params?}` | Any line for the log panel: preparation steps, launcher actions, emulator milestones. Launcher lines carry a `log.event.*` key and parameters, and `line` is their English text (the one written to `launcher.log`); the panel translates them and redraws them in the new language when it changes. Lines from the emulator's own log have no key and are shown as they are. |
+| `game-state` | `GameState {running, exitCode}` | The emulator process starts or ends (also when it ends by itself or crashes). |
+| `install-progress` | `InstallProgress {done, total, file}` | During `install_game`, at most every 200 ms: bytes done (skipped files count as done) of the whole game, the file being written (relative path). |
+| `prepare-progress` | `PrepareProgress {stage: linking/mod/patches/done, percent}` | During `prepare_game` (and a preparation inside `launch_game`). The UI shows the step as "Preparing..." and the log lines; it does not draw the percentage. |
+| `cache-progress` | `ShaderCacheState` | At the start of each warm-up round (`warming`, `round`) and when the warm-up ends for any reason (`ready` or `empty` from the cache folder, `round` 0). |
+| `friends` | `FriendsState` | After sign-in (the `LoginReply` lists), on shadNet friend notifications (FriendQuery 5, FriendNew 6, FriendLost 7, FriendStatus 8), after each friend command, when the connection is lost (everyone offline) and on sign-out (empty). |
+| `invite` | `Invite {from}` | When shadNet pushes an invitation to a game session to the launcher's own connection: `WebApiPushEvent (17)` with service `sessionInvitation` and data type `np:service:invitation` (sent by `POST /v1/sessions/<id>/invitations` to each recipient that is online, shadNet `webapi_routes_session.cpp`). Only while the launcher holds the session, so never while the game runs (then the push reaches the game). The game answers it; the Friends screen shows "<name> invited you. Start the game to answer." until `launch_game`, sign-out or a dismissal. Invitations sent while the launcher was not connected are not shown. |
+| `hosting` | `HostingState` | Reserved for a hosted service starting or stopping; never emitted. |
+| `server-status` | `ServerStatus` | When the probe result changes (every 15 s, and on `get_server_status`). |
+| `update-progress` | `UpdateProgress {downloaded, total}` | During `download_update`: bytes so far and the size (null when the server sends none), about once per percent (per MiB without a size) and at the end. |
+
+## Commands
+
+### App
+
+| Command | Args | Result | What the Rust side does |
+|---|---|---|---|
+| `get_app_info` | - | `AppInfo {launcherVersion, emulatorCommit, defaultServer, updates, hosting}` | Launcher version from the package; the commit of the bundled shadPS4 fork from `commit.txt` (full hash; About shows 7 characters); `defaultServer` (Build and installer); `updates` and `hosting` (Status). |
+| `get_launcher_state` | - | `LauncherState {setupCompleted}` | Read from `<data>\launcher.json`. The setup assistant opens at start-up when `false`. |
+| `set_setup_completed` | `done: bool` | - | Persist in `<data>\launcher.json`. Called when the assistant is finished or skipped. |
+| `check_for_update` | - | `UpdateInfo {available, current, latest, notes}` | Updates (below). `notes`: the release notes, one item per non-empty line, leading `-`/`*` removed. |
+| `download_update` | - | - | Downloads the update found by the last check and verifies its signature, emitting `update-progress`; kept in memory until `install_update`. |
+| `install_update` | - | - | Runs the downloaded installer: on Windows the launcher exits and the installer (passive mode) opens the new version. |
+
+Updates (`update.rs`, Tauri updater plugin; release procedure in [releasing.md](releasing.md)). Endpoint `https://github.com/lilium360/FZH-Resurrection/releases/latest/download/latest.json`; `requireSignedVersion` on. `AppInfo.updates` is false while `plugins.updater.pubkey` in `tauri.conf.json` is the placeholder `UPDATER-PUBLIC-KEY-NOT-SET`: `check_for_update` then logs "Updates are off: this build has no update key." and answers `unsupported` `backend.updates_off` without any request, and About shows "Launcher <version>" with a disabled Check for updates button. The UI checks once at start without showing a failure (the back end logs it: `log.event.updateCheckFailed`), and on Check for updates. About's update row has the states idle, checking, up to date, available (notes behind What's new, Download), downloading (percentage), ready (Restart and update, after a confirmation dialog) and failed (the reason, Try again); a banner repeats available, downloading and ready. `download_update` and `install_update` refuse with `game_running` (`backend.update_game_running`) while any emulator runs and with `busy` during the shader warm-up or a PKG installation; failures: check and download `server_unreachable`, installation `io`, each with the plugin's reason. A check during a download answers `busy`; after a download it answers the downloaded version.
+| `open_link` | `target: "source" \| "licence" \| "licences"` | - | `source`: open https://github.com/lilium360/FZH-Resurrection. `licence`: open its `LICENSE` (`/blob/main/LICENSE`). `licences`: open `<resources>\licences\` in Explorer (`not_found` when missing, e.g. in development). Opener plugin. |
+| `save_problem_report` | `report: {description, attachLogs, attachSystem}`, `title` (the dialog title, `dialog.saveReportPicker`) | `string \| null` (full path; null when the player cancels the dialog) | Save dialog (Desktop, `fzh-report-YYYY-MM-DD-HH-MM-SS.txt`), then one text file (`report.rs`): header (date, launcher version, emulator commit, Online ID), the description, `settings.json`, `launcher.json`; with `attachSystem`: Windows version, GPU and driver, CPU, memory (PowerShell CIM queries); with `attachLogs`: `logs\last-launch.txt`, the last 1 MB of `logs\launcher.log`, the last 4 MB of `run\user\log\shad_log.txt`. Redaction over the whole text: the stored password is replaced by `[removed]` wherever it appears, and on any line naming password/passwd/token/secret/apikey the value after the first `=` or `:` is replaced. `users.json` itself is never copied. Nothing is sent: the UI tells the player to send the file to whoever gave them the launcher. No zip. |
+
+### Settings
+
+| Command | Args | Result | What the Rust side does |
+|---|---|---|---|
+| `load_settings` | - | `Settings` | Read `<data>\settings.json`; missing or invalid values fall back to the defaults, field by field. |
+| `save_settings` | `settings: Settings` | `Settings` (normalized) | Validate (allowed values below; `privateServer` against the address rules below), write, return. Nothing is applied to the emulator here: everything is applied at launch. Changing the server closes the launcher's shadNet session (Account). |
+| `list_audio_devices` | - | `AudioDevices {inputs, outputs}` | Active endpoints from `HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\MMDevices\Audio\Capture` and `\Render` (`DeviceState & 0xF == 1`), named `"<description> (<adapter>)"` from the `Properties` values `{a45c254e-...},2` and `{b3f8fa53-...},6`: the WASAPI friendly name SDL3 reports and the emulator matches exactly (`sdl_audio_out.cpp`, `sdl_audio_in.cpp`; its log shows the same names, e.g. "Speakers (USB Audio Device)"). `id` = `label` = that name, written to `Audio.sdl_mic_device` / `Audio.sdl_main_output_device`. A saved device that is not present stays selectable (the emulator then falls back to the default). Not verified: that a chosen non-default device is actually opened in a game session, and that SDL never names a device differently from `"<description> (<adapter>)"` (the emulator would then use the default device and log it). |
+
+Settings (UI key, allowed values, UI default, how it reaches the game):
+
+| UI key | Values | UI default | Applied as |
+|---|---|---|---|
+| `launcherLanguage` | `en it` | Italian when Windows shows Italian (`GetUserDefaultUILanguage`), else `en` | Launcher only: the UI language (`src/i18n`). A stored value without a bundle (`fr`, `de`, `es` from earlier versions) falls back to the system default. |
+| `microphone` | `off`, `default`, device id | `default` | `config.json` `Audio.sdl_mic_device`: `None` for off, `Default Device` for default, else the device name. |
+| `audioOutput` | `default`, device id | `default` | `config.json` `Audio.sdl_main_output_device`. |
+| `gameLanguage` | `default it-IT en-US en-GB fr-FR de-DE es-ES pt-PT ru-RU pl-PL` | `default` | env `SHADPS4_CONSOLE_LANGUAGE` (empty for default). |
+| `controller` | `aim pad` | `aim` | `config.json` `Input.use_special_pad` = aim, `Input.special_pad_class` = 9. |
+| `gripRight`, `gripUp`, `gripForward` | -0.5..0.5, -0.5..0.5, -0.2..0.8 | 0, 0.07, 0.30 | env `SHADPS4_XR_PAD_OFFSET = "right,up,-forward"` (C `%g` formatting), `0,0,0` with the pad. |
+| `gripPitch`, `gripYaw`, `gripRoll` | -90..90 each (degrees) | 0, 0, 0 | env `SHADPS4_XR_PAD_ROTATION = "pitch,yaw,roll"` (`%g`), `0,0,0` with the pad. Muzzle up, muzzle right, clockwise seen from behind. |
+| `modFreeTurn` | bool | false | Mods screen, "Disable the FACE CAMERA warning". Switches `isEnabled` of the patch named `No turn-around warning` when the patch files are installed (`instance::with_patch_enabled`); the emulator reads one patch file per game, so optional patches live in the same XML. |
+| `frameRate` | `60 90 120` | `90` | 90/120: env `SHADPS4_VR_REFRESH_RATE` = value, plus pak entries (below). 60: no pak entries and `SHADPS4_VR_REFRESH_RATE` empty. |
+| `asyncShaders` | bool | true | env `SHADPS4_ASYNC_PIPELINES` 1/0. |
+| `pixelDensity` | `default 0.5 0.7 0.85 1.2 1.4 1.6 1.8 2.0` | `default` | pak `vr.PixelDensity=<v>` unless default (with `default` the engine's own value applies). |
+| `sharpness` | 0..1 step 0.05 | 0 | env `SHADPS4_VR_SHARPEN` (`%g`). |
+| `fieldOfView` | 50..100, whole number | 100 | env `SHADPS4_VR_FOV` (empty at 100). |
+| `shadowQuality` | `default 0` | `default` | pak `r.ShadowQuality=0` turns dynamic shadows off. Measured: 0 removes them, 5 shows no gain over the game's 3, so only off is offered. |
+| `anisotropicFiltering` | `default 4 8 16` | `default` | pak `r.MaxAnisotropy=<v>`. |
+| `antialiasing` | `default none taa msaa` (no FXAA: no visible effect) | `default` | pak `r.DefaultFeature.AntiAliasing=<index in none,fxaa,taa,msaa>`, plus `r.PostProcessAAQuality=` 0 (none), 4 (fxaa), 3 (taa): the game's base-PS4 quality level leaves it at 0, which silences FXAA and TAA. |
+| `fpsCounter` | bool | false | `--show-fps` after `-g <eboot>`. F10 toggles it in game too. |
+| `frameStats` | bool | false | env `SHADPS4_FRAME_STATS` = `1`, else empty. |
+| `usePrivateServer` | bool | false | false: the build-time default server (`FZH_DEFAULT_SERVER`, Build and installer). |
+| `privateServer` | server address (below) | empty | Server address used at launch. |
+
+Server address (`instance::Server`): a host name or IP address (letters, digits, `.`, `_`, `-`, at most 253 characters), alone for the standard ports or followed by five non-zero ports for a host that hands out its own: `host:game:matching:webapi:backend:relay` (TCP game, UDP matching, TCP WebAPI, TCP backend, UDP relay). Either form may end in `/relayhost` or `/relayhost:port` (non-zero port, 31316 when omitted) for a connection relay on another machine, or in a list of up to 8 relays separated by `,` (`/relayA[:port],relayB[:port]`, for relays in several regions); the relay port of the first part is then unused. `/` and `,` cannot appear in a host name, so the address stays one string. Refused after `/`: an empty part or entry (`host/`, `host/a,`, `host/a,,b`), spaces, a second `/`, more than 8 entries, and the same relay twice (host compared without case, a missing port counting as 31316). The emulator registers with every listed relay and, for each other player it cannot reach directly, agrees with that player on one of them (lowest round trip as measured by the player whose address sorts first); every player must therefore get the same list, which holds when they all type the same server address. The relay part is not sent to the mod pak (`--server=` gets the address without it). Standard ports: shadNet TCP 31313, UDP 31314, WebAPI 31315, backend 1338, relay UDP 31316. An address that does not parse is taken as a bare host (an IPv6 literal, for one). `Settings.server()` is the private server when `usePrivateServer`, else the build-time default server.
+
+Fixed by the launcher, not in the UI: headset mode on (`SHADPS4_VR=1`), one emulator instance. The lobby (players needed to start public TRAINING, countdown) keeps the game's own rules; only the warm-up changes it. Missing keys in a stored or received `Settings` take their defaults (`#[serde(default)]`), so older `settings.json` files still load.
+
+Pak entries for 90/120: `[/Script/MorpheusEditor.MorpheusRuntimeSettings]PSVRFrameSequence=Render90Scanout90` (or `Render120Scanout120`), `[/Script/Engine.Engine]SmoothedFrameRateRange=(LowerBound=(Type=Inclusive,Value=22.000000),UpperBound=(Type=Exclusive,Value=240.000000))`, `r.NumBufferedOcclusionQueries=2`.
+
+### Game files
+
+| Command | Args | Result | What the Rust side does |
+|---|---|---|---|
+| `get_game_files` | - | `GameFiles {base, update, prepared, install, leftovers}` | From `<data>\launcher.json`; `prepared` only if the game links, the mod pak and the patches are present and match the chosen folders. `install` (null without a PKG half): `InstallInfo {location, target, complete, running, size}`; `leftovers`: `[{target, size}]`, extracted folders on disk that the current choice does not use. |
+| `pick_folder` | `kind: "game" \| "base" \| "update" \| "install"`, `title` | `string \| null` | Native folder dialog (dialog plugin) with the title the UI sends (`folderPicker.<kind>` in the launcher language; `kind` is kept for the mock); null on cancel. A folder holding `.pkg` files is a valid game folder (the dialog picks folders, not files). |
+| `select_game_folder` | `path`, `expect: null \| "base" \| "update"` | `FolderCheck` | Detection (below). `expect` null: the game folder; `"base"`/`"update"`: the second picker, which completes the half stored before. Stores what was recognised, `prepared = false`. |
+| `reset_game_files` | - | `GameFiles` | Forget both folders, `prepared = false`. Never deletes the player's dump or an extracted copy. |
+| `prepare_game` | - | `GameFiles` | Steps below; emit `prepare-progress` and `log`. `game_not_ready` without both folders, `game_running` while playing, `busy` while another preparation or a launch runs. The UI calls it by itself after `ready`, at start-up when both folders are stored but not prepared, and from "Try again" after a failure. |
+| `get_game_art` | `refresh: bool` | PNG bytes (`tauri::ipc::Response`, an `ArrayBuffer` in JS; empty = none) | The selected game's key art for the Game screen banner: `sce_sys/pic1.png`, else `pic0.png`, else `icon0.png`, from the base game's folder then the update's (for PKG files: the installed copy, only once installed). Only PNG files (signature checked) up to 8 MB. The path comes from `launcher.json`, never from the web side. `refresh: false` returns the copy cached in `<data>\cache\game-art.png` at once (shown at start-up before the checks); `true` reads the game again and rewrites or removes that copy. The UI refreshes it at start-up and whenever the game folder, the installation or its removal changes; no image is bundled with the launcher. The mock returns null (neutral placeholder). |
+
+`FolderCheck` (tagged by `status`): `{status:"ready", files: GameFiles}` (base and update known: one merged folder, two subfolders, or the second picker completed the pair); `{status:"needUpdate", base, note}` (only the base game: the UI asks for the update with a second picker); `{status:"needBase", update, note}` (only the update); `{status:"rejected", path, found, error}` (`found` = short description of what is there, e.g. `CUSA09831 · USA · v01.00` as `dump.foundRelease` with a nested `dump.region.*`, or just the name when nothing was recognised; `error` = the sentence shown under the step, a `dump.*` key). `note`: the error of a rejected counterpart found next to the recognised half (e.g. `dump.wrongUpdateVersion` "Update 1.40 found: version 1.43 is needed."), else null. All three are `Msg` texts (Conventions); the English sentences quoted below are their `message`. A rejection of the game folder forgets both halves; a rejection in the second picker keeps the stored half.
+
+Detection (`dump::detect`): the candidates are the chosen folder and its direct subfolders that hold `sce_sys/param.sfo` (any names, sorted). Each is classified (`dump::classify`): category `gp` with `sce_discmap.plt` = merged (checked as base and as update), `gp` = update, anything else = base, each with the rules below. A merged candidate wins; else the first valid base and the first valid update. With `expect`, only the expected half is taken from the folder and combined with the stored one; the other half there gives "This folder holds the base game, not the update." (or the reverse).
+
+Then the `.pkg` files (any case of the extension) in the chosen folder and in its direct subfolders, sorted: each is identified by the unencrypted param.sfo entry (id 0x1000) of its own header, whatever its name (category `gp` = update, else base), with the same rules and messages as a folder, "This PKG file" in place of "This folder" (e.g. "This PKG file holds CUSA00001, not Firewall Zero Hour (CUSA11182)."; `found` = `<file name> · <region> · v<APP_VER>`). A file that is not a PKG gives "`<name>` · not a PS4 PKG file" / "This file is not a PS4 PKG file, or it is damaged.". Folders come first, so an extracted folder wins over a PKG file of the same half; base and update can be one of each (e.g. base PKG file + update folder). No candidate: "No PS4 game here: this folder and its subfolders hold no PKG files and no game dump (sce_sys/param.sfo)." The UI's recognised line ends with "PKG files", "PKG file and folder", "merged folder" or "two folders", e.g. "CUSA11182 · Europe · base 1.00 + update 1.43 · PKG files".
+
+Validation of one dump folder (`dump::check`): read `sce_sys/param.sfo` (TITLE_ID, CATEGORY `gd` = game / `gp` = patch, APP_VER, VERSION, CONTENT_ID for the region: E Europe, U USA, J Japan, H Asia). `found` = `<folder name> · <region> · v<APP_VER>`.
+
+- Base: TITLE_ID `CUSA11182`, category `gd`, `eboot.bin` and `firewall/content/paks/firewall-ps4.pak` present. A **merged folder** (base and update already in one folder: category `gp` plus the base game's `sce_discmap.plt`) is accepted too. `DumpInfo.version` = VERSION (`01.00`).
+- Update: TITLE_ID `CUSA11182`, category `gp`, APP_VER `01.43`, `eboot.bin` present. A merged folder passes too and fills both halves.
+- Messages: USA release "CUSA09831 is the USA release: not supported yet. ..."; "This folder holds the update, not the base game."; "This folder holds the base game, not the update."; "Update 1.40 found: version 1.43 is needed."; USA update "... does not match your base game."; missing param.sfo, other title, incomplete dump.
+
+Prepare the game (`files.rs`, `commands::prepare_files`). **Nothing is copied and the dumps are never written to.** The emulator overlays the update and the mods by itself: `MntPoints::GetHostPath` and `IterateDirectory` (`src/core/file_sys/fs.cpp` of the emulator) resolve every `/app0` path first in `<game folder>-mods`, then in `<game folder>-UPDATE` (or `-patch`), then in the game folder, and directory listings merge the three. Those folders must be siblings of the game folder, and the player's dumps can be anywhere with any name, so the launcher builds the siblings under `<data>\game` with junctions:
+
+1. `linking`: `<data>\game\CUSA11182` -> base folder, `<data>\game\CUSA11182-UPDATE` -> update folder (removed when base and update are the same merged folder). An existing junction is re-pointed; anything else at those paths is refused. Junction targets must be on a local NTFS drive.
+2. `mod`: build `<data>\game\CUSA11182-mods\firewall\content\paks\zz-fzh-mod_P.pak` (`modpak.rs`; `tools/modpak.py` is the reference implementation): read `firewall/Config/DefaultEngine.ini` and `firewall/Config/PS4/PS4Engine.ini` from the update's `firewall-ps4.pak` (the base one if the update has none) and set: Zygo off (`[WWSZygo] bEnabled=false`); `FCBackend` `ApiBaseURL` and `GatewayURL` = `http://<host>:<backend port>/parse/` (IPv6 hosts in brackets); `IpNetDriver` `ConnectionTimeout` and `InitialConnectTimeout` 300; for the warm-up only, lobby players (`FCDebug.Session.PVEPlayers`) and countdown (`FCDebug.Session.LobbyLifeTime`); graphics entries in `[SystemSettings]` of PS4Engine.ini; `[Section]key=value` entries in DefaultEngine.ini. Inputs are `Settings.pak_inputs()`: the graphics entries (each holds `=`), then `--server=<address>` when the server is not `127.0.0.1`; `warmup_pak_inputs()` puts players and countdown (no `=`) first. They are stored as `modPakInputs` and the pak is rebuilt at launch when they change.
+3. `patches`: copy `<resources>\patches\*.xml` to `<data>\run\user\patches\fzh\` (with `No turn-around warning` switched per `modFreeTurn`) and register each in `files.json` as `{"<name>": ["CUSA11182"]}`, keeping other entries. An entry for CUSA11182 that is no longer bundled (a patch file renamed or dropped by an update) loses CUSA11182, and the entry and its file go when no title is left: the emulator applies one patch file per game. A mod pak under its earlier name (`LEGACY_MOD_PAK_NAME` in `layout.rs`) is deleted whenever the pak is written, so two paks never load together.
+4. Set `prepared = true`, emit `prepare-progress {stage:"done", percent:100}`, log "Preparing: game ready".
+
+`prepared` in `GameFiles` is true only when the stored flag is set, the junctions point at the chosen folders, the mod pak exists and the installed patches equal the bundled ones. `select_game_folder` and `reset_game_files` never delete anything (old junctions stay until the next preparation re-points them).
+
+### Installing from PKG files
+
+| Command | Args | Result | What the Rust side does |
+|---|---|---|---|
+| `get_install_plan` | - | `InstallPlan {location, target, total, present, required, free, error}` | Opens the chosen PKG files (header, outer and inner PFS), lists what extraction writes, counts what is already in `target` (whole files of the right size, recorded `.part` lengths), and the free space on that drive (`GetDiskFreeSpaceExW`). `error` (else null): not enough space ("Not enough free space on C:: 40.1 GB needed, 12.0 GB free. Free some space or choose another install location."), the target holds files that are not part of this game, the target is a file, the target is inside `<data>\game`. |
+| `set_install_location` | `path` | `InstallPlan` | Stores the parent folder (null when it is the default), `prepared = false`; if the game is already there completely, records it as installed (below). |
+| `install_game` | - | `GameFiles` | Refuses with `busy` during a preparation, a warm-up or another installation, and with the plan's `error`. Records the target in `installs` before writing, then extracts with 1 reader thread and up to 6 decrypt/decompress threads (8 MiB chunks, bounded queue), emits `install-progress`, logs "Installing: 40.1 GB into ... (... to write, ... already there)" and "Installing: done in 17 min 52 s (35 MB/s)" or "Installing: cancelled; the 5.1 GB extracted so far stay for the next time". Resolves when done (`install.complete` true; the UI then runs `prepare_game`) or cancelled (false). |
+| `cancel_install` | - | - | Sets the cancel flag; the running extraction stops after the current chunk, syncs the file and records its length. |
+| `delete_install` | `target` | `GameFiles` | Only a target in `installs`; `busy` while installing, `game_running` while any emulator runs. Deletes exactly the files of that record (and their `.part`/`.part.len`), then the folders left empty; other files are kept and counted in the log. Forgets the record; `prepared = false` when it was the current game. The PKG files are never touched. |
+
+What is extracted (`install::plan`): with both PKG files, **one merged folder**: the base game's files the update does not replace, all the update's files, then the unencrypted PKG entries with id >= 0x1000 and a known name into `sce_sys/` (base first, the update's win; an inner file with the same path is replaced by the entry). Merged rather than two sibling folders for the emulator to overlay: the update's `firewall-ps4.pak` (40.0 GiB) replaces the base one entirely, so siblings would also store the base pak for nothing. Merged needs 40.1 GiB (43 050 220 347 bytes) for CUSA11182 + 1.43, and detection already accepts the result as a merged dump. With only one PKG file (the other half a folder), that half alone is extracted and the other stays a folder the emulator overlays as before. The launcher's own mod pak `zz-fzh-mod_P.pak` is not part of the extraction.
+
+Decryption: the content id from the header (0x40, 36 bytes) and the seed at 0x370 of the outer PFS give `EKPFS = SHA256(SHA256(be32 1) ‖ SHA256(content id padded to 48) ‖ "0"×32)`, `key = HMAC-SHA256(EKPFS, seed)`, `r = HMAC-SHA256(key, le32 1 ‖ seed)`, AES-128-XTS with data key `r[16..32]`, tweak key `r[0..16]`, 4 KiB sectors from sector 16, tweak = sector number. Outer PFS `uroot/pfs_image.dat` = PFSC (blocks stored when their size equals the block size, zeros when empty, else zlib, raw deflate as a fallback) of the inner PFS, whose `uroot` files are contiguous from `db[0]`. No key material is logged or stored. PKG files with a real (non-zero) passcode and DLC are not supported.
+
+Resuming: a file already there with the right size is skipped; a file being written is `<name>.part`, synced every 1 GiB and on cancel or error with its valid length written to `<name>.part.len`, and continues from that length next time (after a crash, from the last sync); when complete it is renamed and the `.len` removed.
+
+State: `installs` remembers every extraction, so a restart does not extract again. On choosing a folder whose PKG files were extracted before, the launcher returns to that location; and when the target already holds the whole game (all files, right sizes, nothing foreign), it is recorded as installed without extracting (`install::adopt`, read-only), e.g. on a later visit or after reinstalling the launcher. The `FZH Resurrection` subfolder is never taken for a second dump: detection looks for `.pkg` files and `sce_sys/param.sfo` only one level down, and the game is two levels down. "Change folder..." (`reset_game_files`) never deletes anything: the confirm dialog says the installed copy stays, and the Game screen lists it under "Installed copies not in use" with a Delete... button; the current one has "Delete installed copy..." ("Delete the installed game? The launcher deletes the 40.1 GB it extracted into .... Your PKG files are not changed: you can install again from them.").
+
+Game screen steps with PKG files: Game folder ("CUSA11182 · Europe · base 1.00 + update 1.43 · PKG files"), Install the game (Install location row with Change..., "Needs 40.1 GB · 96.5 GB free on D:", Install or Resume; while running a bar, "12.3 GB of 40.1 GB · 30% · about 6 min left", the file, and Cancel), Prepare the game ("Starts by itself once the game is installed.").
+
+Measured (PKG files and target on separate NVMe drives): planning 0.03 s; extraction of 40.1 GiB in 113 s + 1072 s (cancelled once, resumed), 33-48 MB/s, limited by the target drive (plain sequential writes to it measured 41 MB/s, reads from the source drive 1007 MB/s). The extracted folder was identical to a merged folder made by the reference Python extractor (39 files, sizes, SHA-256 of every file up to 128 MiB and of the first and last 64 MiB of the pak).
+
+### Game
+
+PLAY is enabled when the game is prepared and an account is signed in; nothing else is checked (no headset checks).
+
+| Command | Args | Result | What the Rust side does |
+|---|---|---|---|
+| `get_game_state` | - | `GameState` | Whether the emulator child (or any `shadps4.exe`, except during a warm-up) runs. |
+| `launch_game` | - | `Msg \| null`: a warning when the play grant failed (step 8), shown as a toast; the game starts anyway | Steps below; then emit `game-state {running:true}` and tail the log. `busy` during a warm-up, an installation, or another preparation or launch; `game_running` if any `shadps4.exe` runs; `not_signed_in` without an account in `users.json`; when the game is not prepared (links, mod pak or patches missing) it prepares it first (log "Launcher: the game files are not prepared, preparing them now"); `game_not_ready` only without both folders or when a folder no longer validates; `not_found` if the emulator is missing. |
+| `stop_game` | - | - | Kill the launcher's own emulator child and wait for it; emit `game-state {running:false, exitCode:null}`. It does not kill other `shadps4.exe` processes: if only a foreign one runs it returns `game_running`; during a warm-up, `busy`. |
+| `get_controller_check` | - | `ControllerCheck {profile, presses}` | Reads the last 8 MB of `run\user\log\shad_log.txt` and parses the emulator's `VR input:` lines: `profile` = the OpenXR interaction profile of the right controller from "the right controller is taken as <profile>" ("" when none or unknown); `presses` = a count per gamepad button for lines ending in `= <button>` (`cross square circle triangle options l1 r1 l2 r2 l3 r3`, case-insensitive). Empty when there is no log. The UI shows which buttons reached the game in the last session. |
+
+Launch, step by step:
+
+1. Server address `s` = `Settings.server()`.
+2. Rebuild the mod pak if `pak_inputs()` differ from `modPakInputs` or the pak is missing (graphics entries, `--server=s` when not `127.0.0.1`).
+3. `config.json` (`instance.rs`): a JSON edit that keeps every other key (the emulator re-serializes the file and merges a partial file with its defaults, so a new instance starts from an empty object): `General.shad_net_enabled = true`, `General.connected_to_network = true` (both default to false in the emulator), `General.shadnet_server = "<host>:<game port>"`, `General.shadnet_webapi_server = "http://<host>:<webapi port>"`, `Input.use_special_pad` (aim), `Input.special_pad_class = 9`, `Audio.sdl_mic_device` (`None`/`Default Device`/name), `Audio.sdl_main_output_device` (`Default Device`/name), `Vulkan.pipeline_cache_enabled = true` (off by default in the emulator; without it no compiled pipeline is written to `user\cache\CUSA11182`).
+4. `host_overrides.json`: the entry `"<host>:<webapi port>" -> "http://<host>:<webapi port>"` (the shadNet WebAPI stays on the shadNet server) and `"*" -> "http://<host>:<backend port>"` (every other HTTP request of the game goes to the backend); other keys are kept, except entries that map a host to itself (the WebAPI entry of an earlier server).
+5. Install the patches (preparation step 3).
+6. Write the shadNet account into `users.json` again (player 1, `shadnet_enabled = true`, the password from the Credential Manager when it holds one; Account storage, below).
+7. Rename the previous `shad_log.txt` to `shad_log.previous.txt`, write `<data>\logs\last-launch.txt`, log "Launcher: playing on the official server" (or the private server's address).
+8. The play grant (Backend account API) on the launcher's own session, opened first if needed: `GetAuthorizationCode`, then `POST /account/v1/play`. Then close that session (`Terminate`, socket closed) so the game's login is not refused with `LoginAlreadyLoggedIn`. While the game runs the launcher does not reconnect; friend commands answer `game_running` ("use the in-game friends panel"). When the game exits (by itself or `stop_game`) the launcher signs in again and emits `friends`.
+9. Start `<emulator> -g <data>\game\CUSA11182\eboot.bin` (plus `--show-fps` with `fpsCounter`) with working directory `<data>\run`, no console window (`CREATE_NO_WINDOW`), stdio to null, and these environment variables (an empty value removes the variable):
+   - fixed: `SHADPS4_VR=1`, `SHADPS4_OPENXR=1`, `SHADPS4_XR_WAIT=0`, `SHADPS4_XR_PAUSE=0`, `SHADPS4_XR_GAMEPAD_LAYOUT=1`, `SHADPS4_XR_PAD_HAND=right`, `SHADPS4_VR_PACE=1`, `SHADPS4_NATIVE_CLIP_DISTANCE=1`, `SHADPS4_TITLE_RESOLUTION=title`, `SHADPS4_TITLE_EYE_WIDTH=`, `SHADPS4_INPUT_SCRIPT=`, `SHADPS4_LIVE_INPUT=`, `SHADPS4_VR_DESKTOP_VIEW=spectator`, `SHADPS4_VR_DESKTOP_CROP=1` (the window on the monitor shows one eye filling it; the last two are empty in a warm-up round);
+   - from settings: `SHADPS4_XR_PAD_OFFSET`, `SHADPS4_XR_PAD_ROTATION`, `SHADPS4_ASYNC_PIPELINES`, `SHADPS4_CONSOLE_LANGUAGE`, `SHADPS4_FRAME_STATS`, `SHADPS4_VR_SHARPEN`, `SHADPS4_VR_FOV`, `SHADPS4_VR_REFRESH_RATE` (settings table; numbers formatted like C `%g`);
+   - from the server address: `SHADPS4_SHADNET_UDP_PORT` = the matching (UDP) port, empty when it is 31314; `SHADPS4_P2P_RELAY` = the relays as `<host>:<port>` joined by `,` in the order typed, unless the only relay is the shadNet host on 31316 (empty: the emulator assumes that by itself).
+10. Every 500 ms: read the new lines of `<data>\run\user\log\shad_log.txt` and emit milestones (`game.rs milestone()`), check the process; on exit emit `log` and `game-state {running:false, exitCode}`.
+
+Milestones (emulator log text -> `log` line; each once per run except the cache line):
+
+| Log text | Line |
+|---|---|
+| `Run: Starting shadps4 emulator` | "Emulator: started" |
+| `WarmUp: Preloaded N pipelines` | "Shader cache: N pipelines loaded" |
+| `Session with the headset made` | "OpenXR: session opened" |
+| `has no headset connected yet` | "OpenXR: no headset connected yet, the game starts in the window" |
+| `No OpenXR runtime that could show frames` | "OpenXR: no headset runtime, the game is shown in the window" |
+| `HandleLoginReply: Logged in npid='X'` | "Network: X signed in" |
+| `ProbeServer: probe: server S` ... `unreachable` | "Network: the server is unreachable, playing offline" (no address; the "is reachable" line is not matched) |
+| `shadNet enabled but credentials missing` | "Network: no shadNet account is set for the game" |
+| `connection failed (state=` | "Network: the server cannot be reached" |
+| `authentication failed (state=` | "Network: the server refused the sign-in" |
+| `sceNpMatching2SearchRoom: called` | "Network: looking for a lobby" |
+| `Unhandled Exception` / `Assertion Failed` | "Emulator: fatal error (details in shad_log.txt)" |
+
+"Game: main menu" has no known log line yet (Open questions, 7).
+
+### Shader cache
+
+| Command | Args | Result | What the Rust side does |
+|---|---|---|---|
+| `get_shader_cache` | - | `ShaderCacheState {status, round, rounds, minRounds, roundSeconds}` | `warming` while a warm-up runs; else `empty` if `<data>\run\user\cache\CUSA11182` is missing or empty, else `ready`. `rounds` 8, `minRounds` 2, `roundSeconds` from the script (345; 0 when the script is missing). |
+| `start_shader_warmup` | - | `ShaderCacheState` | Checks, in order: not already warming (`busy`), no emulator running (`game_running`), no preparation or launch running (`busy`), both game folders chosen (`game_not_ready`), emulator present and script present (`not_found`), signed in (`not_signed_in`), the configured server's game port and backend port answer (`server_unreachable`, "Cannot reach the official server. ..."). Then asks for the play grant (Launch, step 8; a failure is only logged), suspends the launcher's shadNet session (the game signs in with the same account) and starts the warm-up thread; returns `warming`, round 1. |
+| `cancel_shader_warmup` | - | `ShaderCacheState` | Kills the round's emulator at once, waits (up to 30 s) for the thread to restore the pak, returns the state. No-op when not warming. |
+| `clear_shader_cache` | - | `ShaderCacheState` | Delete `<data>\run\user\cache\CUSA11182`. `busy` while warming, `game_running` while any emulator runs. |
+
+The warm-up plays solo TRAINING matches from an input script in the game window, one emulator at a time:
+
+1. The mod pak is rebuilt with `warmup_pak_inputs()`: the player's own graphics entries and server, with 1 player and an 8 s countdown in place of the game's own lobby rules. Keeping the graphics entries makes the cache match the player's settings. `modPakInputs` records the warm-up inputs, so a launch after a crash rebuilds the normal pak by itself.
+2. Up to 8 rounds. Each: `prepare_launch(Warmup)` (instance config with `for_warmup()`: gamepad, no microphone; account into `users.json`; log rotation; `last-launch.txt`), then the emulator with `warmup_environment()`: the normal environment for the gamepad plus `SHADPS4_OPENXR=0` (no headset: the virtual headset, the game in its window on the monitor), `SHADPS4_INPUT_SCRIPT=<resources>\input\warmup.txt`, `SHADPS4_FRAME_STATS` empty and no `--show-fps`. The script (times from emulator start) signs in, goes to TRAINING > PUBLIC and then moves, turns, shoots, reloads, switches weapons and uses the equipment until 334.9 s; a round lasts `script_seconds()` = end of the last input + 10 s = **345 s**, then the emulator is killed. The emulator child sits in a job object with `KILL_ON_JOB_CLOSE`, so it dies with the launcher even on a crash, and `RunEvent::Exit` kills it when the launcher closes normally. Milestones of the log go to the log panel as during a game.
+3. After each round `read_round()` counts `Compiling graphics pipeline` lines (both forms of `vk_pipeline_cache.cpp`), and looks for `sceNpMatching2SearchRoom: called` (a match), `HandleLoginReply: Logged in` and crash lines; the launcher logs "Warm-up: round N: X new pipelines, match played". It stops after two rounds in a row with a match and fewer than 5 new pipelines (cache ready), and after two rounds in a row without a match ("the game could not sign in to the server" / "did not reach a match"), so a server problem does not cost 46 minutes.
+4. Finally, also after a cancel or a failure: the pak with the normal inputs, the launcher's session resumes, `cache-progress` with the cache state.
+
+A warm-up lasts from 2 x 345 s, about 12 minutes, to 8 x 345 s = 46 minutes plus start-up. While it runs, `launch_game`, `prepare_game` and `clear_shader_cache` answer `busy`, `get_game_state` does not count its emulator as a game, PLAY is disabled ("Shader cache warm-up running: Graphics"), and `sign_out` cancels it first. The UI says before starting that a game window opens on the monitor and plays by itself for about 6 minutes a round, 12 to 46 minutes in all, and to keep the headset off and leave the PC alone. Warm up is disabled with the reason when a precondition is missing (script missing, game running, no game folder, preparing, not signed in, server unreachable).
+
+### Account (shadNet)
+
+The shadNet protocol is documented in shadNet's `documentation/protocol.md` (upstream https://github.com/shadps4-emu/shadNet).
+
+Server address: the single host setting (Settings, above), with the standard ports unless the address carries its own. Changing it in `save_settings` closes the session; the monitor signs in again on the new host with the stored account (the UI's "Change server?" dialog signs out first anyway).
+
+Connection (as the emulator's `ShadNetClient`): TCP connect (3 s) to the game port, read `ServerInfo` (type 3, protocol 1) before anything else, then requests with increasing packet ids (reply timeout 8 s); a reader thread matches replies by id and handles notifications. After `LoginReply` the launcher sends `SetClientVersion (13)` "FZH-Launcher v<version>": the server keeps a new session hidden from friends until a reported version passes `clientversions.cfg`, and the default file **denies an empty version** after `ClientVersionTimeoutSeconds` (15) and then refuses that account's logins for `ClientVersionCooldownSeconds` (120), which would also lock the game out. A server whose rules allow only `shadPS4 ...` versions turns the launcher away (notification 19, logged). A monitor thread runs every 15 s (and on demand): probes the server (TCP connect to the game port and to the backend port, 1.5 s each), emits `server-status`, and signs in again with the stored account when the session is gone, unless the game runs.
+
+| Command | Args | Result | What the Rust side does |
+|---|---|---|---|
+| `get_account` | - | `AccountState {session, lastOnlineId}` | Session from the account in `users.json` (no network); `avatar` from `account.json` (`"image"` only while `avatar.png` exists), `image` = `avatar.png` as a `data:image/png;base64,` URL or null, `email` empty for the placeholder. The monitor connects in the background. |
+| `register_account` | `onlineId` | `Registration {recoveryCode, session, problem}` | Backend account API, Scheme, registration: the Online ID checked locally against the format (3-16 of `A-Z a-z 0-9 _ -`, `backend.online_id_format`; the reserved list is the server's), a new recovery code, the derived password, `POST /account/v1/register`. Its errors (Endpoints) map to: `invalid_name` -> `invalid_input` `backend.online_id_format`; `reserved_name` -> `invalid_input` `backend.register_name_reserved`; `name_taken` -> `already_exists` `backend.register_id_taken`; `rate_limited` -> `busy` `backend.account_rate_limited {seconds}` (`retryAfter`); `shadnet_unavailable` -> `server_unreachable` `backend.account_shadnet_down`; `registration_closed` -> `unsupported` `backend.register_closed`; any other -> `internal` `backend.account_server_error {code}` (HTTP status); no HTTP answer -> `backend.account_bad_reply`; no connection -> `server_unreachable` `backend.account_unreachable {server}`. `game_running` while the game runs (the emulator would write `users.json` back at exit). On `201`: the password into the Credential Manager and `users.json` (email `<lower-case Online ID>@users.invalid`, as the backend registered it), log `log.event.accountCreated`, then `Login` and `SetClientVersion`. From then on the result is never an error, because the account exists and the code must reach the player: `problem` is the failure of storing (`session` null) or of signing in (`session` set; the monitor retries). The UI shows the recovery code step before anything else. |
+| `sign_in` | `onlineId`, `recoveryCode` | `Session` | Backend account API, Scheme, recovery: the Online ID format, the code canonicalized (`invalid_input` `backend.recovery_code_invalid` without any request), `GET /account/v1/names/<id>` for the registered casing (`404`, an unreachable backend or an older backend without the API: the casing as typed; `429` -> `busy` as above), the derived password, `Login (0)` with `LoginRequest {npid, password}` (no title, the launcher is not a game), then `SetClientVersion`; the password into the Credential Manager and the account into `users.json` (email kept when the same account was stored). Errors: 8/7 -> `wrong_password` `backend.recover_wrong` "Wrong Online ID or recovery code." (one message: shadNet folds unknown Online ID and wrong password into 8), 6 -> `already_signed_in` ("in a running game or on another PC"), 5 -> `unauthorized` (banned, or the 120 s version cooldown), connect/ServerInfo failure -> `server_unreachable`, `game_running` while the game runs. |
+| `sign_out` | - | - | Stop the launcher's game first (kill + wait, so the emulator cannot save the account back), `Terminate (1)` and close, delete the account's Credential Manager entry, clear the shadNet fields of player 1 in `users.json`, emit empty `friends`. |
+| `update_profile` | `profile {onlineId, avatar, image}` | `Session` | Local only: `avatar` (0-4 or `"image"`) into `account.json`; `image` (a PNG data URL, checked as `upload_avatar` does) written to `avatar.png`, null deletes it. `"image"` without `image`, or an index out of range -> `invalid_input` `backend.avatar_choice`. A different `onlineId` -> `unsupported` (Open questions, 1). The UI then calls `upload_avatar` when the avatar shown changed. |
+| `upload_avatar` | `image` (`data:image/png;base64,` URL) | - | Avatar, below. Logs `log.event.avatarSent` or `log.event.avatarNotSent {reason}` either way. |
+| `set_recovery_email` | `email` | `Session` | `unsupported` (Open questions, 1). |
+
+The launcher does not keep its own shadNet session open while the game runs (shadNet refuses a second session of the same account, `LoginAlreadyLoggedIn`, 6): it disconnects before launch and reconnects after exit.
+
+The password: the player never sees or types it. The launcher's own copy is in the Windows Credential Manager (Layout), the source of the password for the monitor's sign-ins and for each launch; the emulator's copy stays in `users.json` in plain text, because the emulator reads it there (Account storage in the emulator). An install from before the Credential Manager keeps working with the password in `users.json` until the player signs out. Neither the password nor the recovery code is written to `launcher.log`, the event stream, `account.json`, `settings.json` or `launcher.json` (`tests/live_shadnet.rs` checks the logs, events and those files). The recovery code reaches the front end once, in the `register_account` result, and the UI drops it when the player confirms they saved it.
+
+UI: the setup assistant's Account step and the Profile screen when signed out have Online ID and Recovery code fields, Sign in (both fields) and Create account (the Online ID only; on Profile a dialog with the Online ID). After a registration a recovery code step covers everything, the assistant too: the code in five groups, one or two sentences saying it is the only way to use the account on another PC or after a reinstall and that it is not shown again, Copy (clipboard), and a "I saved my recovery code" check that enables Continue; Escape and a click outside do not close it. Then `problem`, if any, shows as a toast. There is no password field, no Forgot password and no Change password.
+
+Mock (`backend.mock.ts`): `Player1` has the contract's test code; a registered name starting with `taken`, `admin`, `busy`, `closed` or `offline` shows that refusal, `nosign` registers but the sign-in fails (`problem`), and launching with an account starting with `nogrant` returns the play grant warning.
+
+#### Avatar
+
+- Every account's shadNet `avatar_url` is `http://fzh.avatar/a/<onlineId>.png` (set by the backend at registration; Open questions, 1 for older accounts). The game downloads it over HTTP; the host overrides send every host to the backend, which answers `GET /a/<onlineId>.png` with the stored PNG or a plain coloured one.
+- The UI draws the PNG on a canvas, 256x256, opaque: a preset is the gradient and text colour of its CSS class (`.av.c1`...`.av.c5`, read with `getComputedStyle`) with the initials in the `.av.lg` font at the same proportion; the player's own picture is centre-cropped to a square and scaled when chosen (`src/ui/avatar.ts`), and refused with `toast.imageTooLarge` when the PNG stays over 256 KB. That PNG is what `update_profile` stores and `Session.image` returns.
+- `upload_avatar`: decode the data URL; check it (PNG signature, IHDR 256x256, IEND last, at most 256 KB: `backend.avatar_not_png`, `backend.avatar_not_square`, `backend.avatar_too_large`); open the launcher's session if needed (as the friend commands); `GetToken (39)` with **no payload at all** (as the emulator), reply `GetTokenReply {token = 1, user_id = 2, npid = 3}`; then `PUT http://<host>:<backend port>/a/<onlineId>.png` with `Authorization: Bearer <token>`, `Content-Type: image/png`, `Connection: close` and the PNG as body (connect 3 s, read and write 10 s). The backend asks shadNet's WebAPI `GET /v1/users/me/profile?fields=user` with the same header (it answers `{"user":{"accountId":"<n>","onlineId":"<id>"}}`) and stores the file only for that Online ID. Replies: 200 -> done; 403 -> `unauthorized` `backend.avatar_not_owner`; 400 -> `invalid_input` `backend.avatar_refused`; another status -> `backend.avatar_server_error {code}`; no HTTP reply -> `backend.avatar_bad_reply`; no connection -> `server_unreachable` `backend.avatar_unreachable`. The token never reaches a log.
+- When: after saving the profile with a different avatar (an error shows as a toast; the local choice stays saved), and once after every sign-in, registration and launcher start with a stored account (`syncAvatar()` in `ui/actions.ts`), so existing players' avatars reach the server without them doing anything. That one never waits or fails the sign-in: the outcome is only in the log. The monitor's own sign-ins (after the game, after a lost connection) do not upload again.
+- One avatar per launcher data folder, like the colour: `account.json` and `avatar.png` do not record which account they belong to.
+
+#### Account storage in the emulator
+
+From the emulator's sources:
+
+- File: `<data>\run\user\users.json` (`UserSettingsImpl::Load/Save`, `src/core/user_settings.cpp`; `user\` is the portable folder in the working directory, `src/common/path_util.cpp`).
+- Shape (`src/core/user_manager.h`, nlohmann `..._WITH_DEFAULT`, so missing keys take defaults): `{"Users": {"user": [User, ...], "commit_hash": "<emulator commit>"}}`, `User` = `user_id` (1000..1003), `user_name`, `user_color`, `player_index` (1-4, -1 = none), `shadnet_npid` (the Online ID), `shadnet_password` (**plain text**), `shadnet_token` (empty, for future 2FA), `shadnet_email`, `shadnet_enabled` (bool), `np_country`, `np_language`, `np_age`, `np_date_of_birth`.
+- Without the file the emulator creates four users (`shadPS4`, `shadPS4-2..4`, ids 1000..1003, player_index 1..4, shadNet disabled) and their `home\<id>\` folders, then saves it.
+- On load, `Users` of the file is merged over the defaults (`json::update`), so the launcher can write only `{"Users": {"user": [...]}}`; the emulator rewrites the file when `commit_hash` differs and when it exits (`~UserSettingsImpl`), keeping unknown top-level keys.
+- Sign-in: `NpHandler::Initialize` calls `ConnectUserById` for each logged-in user; it needs `General.shad_net_enabled` (config.json), `shadnet_enabled = true` and non-empty `shadnet_npid` and `shadnet_password` (`np_handler.cpp`). The default user is the one with `player_index` 1. Before connecting, the emulator probes `shadnet_server` and disables shadNet for the run if it does not answer within 3 s (`server_probe.cpp`).
+- So the launcher writes, before each launch, the user with `player_index` 1 (normally `user_id` 1000): `shadnet_npid`, `shadnet_password`, `shadnet_email`, `shadnet_enabled = true`; and clears them on sign-out. The password stays in plain text in that file for as long as the emulator reads it there; the launcher's own copy is the Credential Manager's (Account, above).
+
+### Friends
+
+| Command | Args | Result | What the Rust side does |
+|---|---|---|---|
+| `get_friends` | - | `FriendsState {friends, incoming, outgoing}` | The cached lists (from `LoginReply`, then notifications and command replies); wakes the monitor when not connected. `not_signed_in` without an account. `presence`: `online` (shadNet only knows online/offline; the launcher's own session counts as online too) or `offline` with `lastSeen` (ISO time from `FriendStatus.timestamp`, null when unknown); `menu`/`in-game` are never sent (Open questions, 6). |
+| `send_friend_request` | `onlineId` | `FriendsState` | `AddFriend (8)`. 26 -> `not_found` "No player with that Online ID.", 28 -> `already_friend`, 27 -> `blocked`, 3 -> `invalid_input` (own ID). When that player had already asked us, the server forms the friendship. While the game runs: `game_running`. |
+| `accept_friend_request` | `onlineId` | `FriendsState` | `AddFriend (8)` towards the requester; both sides get `FriendNew`. |
+| `decline_friend_request` | `onlineId` | `FriendsState` | `RemoveFriend (9)`: the server clears the requester's flag and sends `FriendLost` to both, so the request disappears on both sides. |
+| `remove_friend` | `onlineId` | `FriendsState` | `RemoveFriend (9)`; also cancels an outgoing request. |
+
+### Server and hosting
+
+| Command | Args | Result | What the Rust side does |
+|---|---|---|---|
+| `get_server_status` | - | `ServerStatus {online, players, region, network, progression}` | For the configured server: `network` = the launcher's session is up or the game port accepts a TCP connection, `progression` = the backend port accepts, `online` = both, `players` null (no such request), `region` = the host setting as typed. Emits `server-status` when it changes. |
+| `get_hosting` | - | `HostingState` | Always `{running: false, services: {network: false, progression: false, relay: false}}`. |
+| `start_hosting` | - | `HostingState` | `unsupported`. Intended: start shadNet, the progression backend (`server/backend/backend.py --host 0.0.0.0 --port 1338`) and the relay (`server/relay/relay.py --host 0.0.0.0 --port 31316`) as children, skip services already running, watch them and emit `hosting`; refuse with `invalid_input` when the saved setting is not "private server". Ports to open: TCP 31313, UDP 31314, TCP 31315, TCP 1338, UDP 31316. |
+| `stop_hosting` | - | `HostingState` | `unsupported`. Intended: terminate the children (10 s, then kill), emit `hosting`. |
+
+## Backend account API
+
+Served by `server/backend/backend.py` on the backend port of the server address (standard 1338), plain HTTP. Implemented and tested on the server side (`server/backend/tests/`, plus a run against a real shadNet) and used by the launcher (`backend_api.rs`, `recovery.rs`; commands `register_account` and `sign_in`, Launch step 8). Players choose only an Online ID and never see an email field or a registration key; the launcher never sends shadNet's `Create` itself.
+
+Play grant in the launcher: before every launch and every warm-up, on the launcher's own session (opened if needed). It never blocks the launch: a backend in `open` mode (the default on loopback) does not need it, and the game then plays as before. `200`: logged as `log.event.playGranted {id, address, duration}` (the address the backend saw, no secret). `404` (an older backend without the account API): logged as `log.event.playGrantNotOffered`, no warning. Anything else (`401 invalid_code`, other statuses, the backend or shadNet unreachable, a shadNet error such as `23` or `4`): `log.event.playGrantFailed {reason}` and, for a launch, the warning `backend.play_grant_failed {reason}` returned by `launch_game` and shown as a toast; on a `grant` server the game's own login will then be refused (`403`) and the game plays offline. The code is never logged.
+
+### Scheme
+
+**Registration.**
+
+1. The launcher generates a recovery code: 25 symbols drawn uniformly with a CSPRNG from the Crockford base32 alphabet `0123456789ABCDEFGHJKMNPQRSTVWXYZ` (125 bits), shown as five groups of five joined by `-`, e.g. `7KQ2M-X9D4R-...`.
+2. It derives the account password from it: `password = base64url_nopad(HMAC-SHA256(key = canonical code as ASCII, message = "fzh-account-v1\n" + lowercase(Online ID) as ASCII))`, 43 characters of `A-Z a-z 0-9 _ -`.
+3. `POST /account/v1/register` with the Online ID and that password (below). The backend creates the shadNet account itself, with the server's registration key, email `<lowercase Online ID>@users.invalid` and `avatar_url` `http://fzh.avatar/a/<Online ID>.png`.
+4. On `201`: the launcher keeps the password in the Windows Credential Manager, shows the code once (with a "write it down" step), and never stores the code. Then it signs in to shadNet as today (`Login` with the Online ID and the password).
+
+Canonical code: upper case; spaces and `-` removed; `O` read as `0`, `I` and `L` as `1`; then exactly 25 symbols of the alphabet, otherwise the launcher says "not a recovery code" without any request. Test vector: code `ABCDE-FGHJK-MNPQR-STVWX-YZ012` (also typed `abcde fghjk mnpqr stvwx yz012`) with Online ID `Player_One` (or `player_one`) gives the password `jJXhJrVT4CM79WTqRKwHHabrAZAfDbx8wWs1nCbXaCc`.
+
+**Sign-in** on a PC that registered or recovered: `Login` with the stored password. Nothing changes for the emulator: `users.json` still needs the password in plain text (Account storage in the emulator).
+
+**Recovery from a new PC.** The player types the Online ID (any casing) and the code. The launcher canonicalizes the code, asks `GET /account/v1/names/<Online ID>` for the registered casing (on `404` it keeps the casing as typed: accounts made with `create-account.sh` are not listed), derives the password with that casing and signs in with `Login`. `8` (`LoginInvalidPassword`) means a wrong Online ID or code. On success the password is stored as after a registration. Any number of PCs can do this; they all share the same password.
+
+**Properties and limits.**
+
+- The server never receives the code. It receives the password once, at registration, passes it to shadNet and keeps no copy; it is neither stored nor logged. shadNet keeps a salted hash (100,000 rounds of SHA-256 over password and a 64-byte random salt, `Database::HashPassword`). Someone who reads the server's files gets that hash and no way back to the password or the code: the password carries 125 bits of the code.
+- The code and the password are equivalent: whoever has either one (the code from the player, the password from `users.json` or the Credential Manager of a PC) can sign in. There is no server-side recovery check, so there are no recovery attempts to limit; guessing would go to shadNet's `Login`, which has no attempt limit, and 2^125 guesses make that pointless.
+- There is no way to change a password: shadNet's binary protocol has no such command (`SendResetToken` 5 and `ResetPassword` 6 are defined but not served), and its Member API, which can, is off and not reachable from outside. A leaked code cannot be revoked; only the server's admin can help (delete the account). That is the price of not depending on extra shadNet services.
+- Accounts made with `create-account.sh` or by an older launcher have no recovery code.
+
+**Name rules.** 3-16 characters of `A-Z a-z 0-9 _ -` (shadNet itself also takes non-ASCII letters, refuses `DeletedUser`, and keeps names unique ignoring case). Reserved: the name in lower case with `_` and `-` removed equals `root`, `server`, `sony`, `psn`, `mod`, `mods`, `null`, `undefined`, `guest`, `player`, `deleteduser`, `everyone`, `anonymous`, `unknown`, or starts with `admin`, `moderator`, `system`, `support`, `staff`, `official`, `shadnet`, `shadps4`, `fzh`, `firewall`, `zerohour`, `resurrection`, `firstcontact`, `playstation`; a server adds its own with `FZH_RESERVED_NAMES`. The launcher may check the format locally; the reserved list is the server's.
+
+**Play grant.** The game proves nothing to the backend: its `/parse/functions/login` carries `uniqueNetId` (the shadNet account id), `nickname` and an empty `accessToken`, and every later call carries only `playerStatsId`. So the launcher vouches for the player before each launch:
+
+1. While signed in, after `SetClientVersion` was accepted: `GetAuthorizationCode (42)` with `GetAuthorizationCodeRequest {client_id = "fzh-backend" (field 1), scope = "fzh:play" (field 2)}`, a proto blob like the other account commands. Reply `GetAuthorizationCodeReply {code (1, string), expires_in (2, uint32, 300)}`. Errors: `23` (`Unauthorized`) while the session is not shown online yet, `4` (`TooSoon`) with 16 unused codes outstanding. The code is single-use and expires after 300 s.
+2. `POST /account/v1/play` with that code (below), from the same PC and to the backend address the game will use.
+3. Then close the session and start the game (Launch, step 8).
+
+The backend redeems the code at shadNet's WebAPI (`POST /2.0/oauth/token`, then `GET /2.0/oauth/token/<access token>`), learns the account id and Online ID, and records a grant for (account id, client address) valid `FZH_SESSION_HOURS` (default 12). The game's login is then accepted for that account only from that address, and it opens a session for its `playerStatsId` bound to the same address with the same lifetime; reading or writing that player's data needs that session. The address must be the one the game's requests come from: connect to the same host name and port the emulator's host overrides use, over the same IP family (not verified which family the emulator's HTTP client picks when the host has both IPv4 and IPv6; the reply's `address` says what the backend saw). When the PC's public address changes (new DSL lease, another network), the game's calls are refused until the next launch calls `/play` again. Players behind one public address (a household, carrier-grade NAT) share it: one of them could log the game in as another whose grant is active.
+
+On a server with `FZH_GAME_LOGIN=grant` (the default on a non-loopback address) a launcher without step 2 cannot play: the game's login gets `403`. `FZH_GAME_LOGIN=open` restores the old behaviour.
+
+### Endpoints
+
+All three: request bodies are JSON (`Content-Type: application/json`) of at most 4096 bytes (`413 too_large`). Replies are JSON with `Cache-Control: no-store`. An error is `{"error": "<code>", "message": "<English text>"}`; `429` adds `"retryAfter": <seconds>` and the `Retry-After` header. Per client address, all `/account/v1/` requests together are limited to 30 per 10 minutes (`429 rate_limited`). Unknown path: `404 not_found`; wrong method: `405 method_not_allowed` with `Allow`. The backend logs no request body of these paths.
+
+| Request | Success | Errors |
+|---|---|---|
+| `POST /account/v1/register` `{"onlineId": "<name>", "password": "<43 characters>"}` | `201` `{"onlineId": "<name as sent>"}` | `400 invalid_request` (not a JSON object, a field missing or not a string, password not 43 characters of `A-Z a-z 0-9 _ -`); `400 invalid_name` (name rules, or shadNet refused the name); `403 reserved_name`; `409 name_taken` (in any casing); `429 rate_limited`; `502 shadnet_unavailable` (shadNet did not answer or answered an unexpected error); `503 registration_closed` (the server does not register accounts, or its key is wrong). |
+| `GET /account/v1/names/<name>` (percent-encoded) | `200` `{"onlineId": "<registered casing>"}` | `400 invalid_name`; `404 not_found` (not registered through this backend; the account may still exist); `429 rate_limited`. |
+| `POST /account/v1/play` `{"code": "<authorization code>"}` | `200` `{"accountId": "<decimal string>", "onlineId": "<registered casing>", "address": "<client address the backend saw>", "expiresIn": <seconds>}` | `400 invalid_request` (code missing, or not 1-64 letters and digits); `401 invalid_code` (unknown, already used, expired, or issued for another `client_id`); `429 rate_limited`; `502 shadnet_unavailable`. |
+
+Registration limits, counted only for successful registrations: per client address `FZH_REGISTER_PER_DAY` (3) per 24 hours and `FZH_REGISTER_COOLDOWN` (60) seconds between two; for the whole server `FZH_REGISTER_GLOBAL_PER_HOUR` (30) per hour. Counters live in memory (a restart clears them). Order of checks for a registration: request limit, body size, JSON shape, name format, reserved names, password format, registration limits, a name already registered here, then shadNet's `Create`.
+
+`BackendErrorCode` mapping (as the launcher does it, with the keys in `register_account`): `invalid_name`, `reserved_name` -> `invalid_input`; `name_taken` -> `already_exists`; `invalid_code` -> `unauthorized` (`backend.play_code_refused`); `rate_limited` -> `busy`; `shadnet_unavailable` -> `server_unreachable`; `registration_closed` -> `unsupported`; `invalid_request` and anything else -> `internal` `backend.account_server_error {code}`, since the launcher always sends a valid request.
+
+Client address: the TCP peer, or, when the server sets `FZH_TRUSTED_PROXY_HEADER` and the peer is one of `FZH_TRUSTED_PROXIES`, the last entry of that header.
+
+## Open questions
+
+1. **Account features missing in shadNet.** No commands for change password, recovery email, password reset, or rename (the NP ID is the display name and the account key). Each needs a server feature (e.g. a WebAPI on the WebAPI port). Passwords are not player-facing any more (Backend account API), so there is no Change password or Forgot password; a leaked recovery code cannot be revoked. The Online ID field stays disabled with a "not available yet" note, and the recovery-email row is hidden (`SHOW_EMAIL` in `ui/screens.ts`; `set_recovery_email` answers `unsupported`). Avatars needed no shadNet change (Avatar, above): a fixed `avatar_url` per account, served and stored by the backend. Accounts created by an older launcher need `avatar_url` set in shadNet's database by whoever runs the server; the launcher has no command for it.
+2. **Unsupported sources.** Dumps or install locations on network drives or non-NTFS volumes (no junction possible), PKG files with a real (non-zero) passcode, and DLC. Not verified on a separate update dump (as opposed to a merged one).
+3. **Public registration.** Settled: the backend registers accounts with the server's key and its own limits (Backend account API); the launcher holds no key and sends no email.
+4. **Public server address and region.** The address is the build-time default (`FZH_DEFAULT_SERVER`). Open: whether the launcher should read it from a small config fetched at start instead.
+5. **Lobby size and countdown.** Settled: the game's own values, no setting. Only the warm-up pak sets 1 player and 8 s.
+6. **Presence, invitations, joining.** shadNet `FriendEntry.presence` is always empty, so friends show only Online / Last seen. Invitations are sent and answered inside the game and the emulator (in-headset banner); the launcher has no Invite or Join and only shows the `invite` notice while the game is closed. F2 (Friends panel) and F10 (FPS counter) are default bindings of the emulator fork (`input_handler.cpp`); they are user-editable in its global input config, so the key can differ.
+7. **Log panel.** Open: a log line for "Game: main menu". The full log goes only in the problem report.
+8. **Hosting on an installed launcher.** The backend and the relay are Python scripts and shadNet is a separate Qt program: bundle them (Python runtime included) or port to Rust. When hosting, the host's own game must use `127.0.0.1`, not the private-server address in its settings.
+9. **Emulator build identity.** `commit.txt` records the source commit plus `-dirty` for tracked changes, while the exe reports its own build commit (window title, `users.json` `commit_hash`). A build that was not made from a clean checkout of the recorded commit makes the two differ; rebuild at the recorded commit before a release.
+10. **shadNet `Terminate`.** The server replies but does not close the socket as the protocol says (its log: "QMetaObject::invokeMethod: No such method QTcpSocket::disconnectFromHost()"); the launcher closes its side 300 ms after the reply. Worth fixing in shadNet.
+11. **Launcher presence.** The launcher's own session shows the player online to friends (and fires `FriendStatus`) while only the launcher is open. There is no way to tell "in launcher" from "in game" without presence support (6).
+12. **Wrong casing at sign-in.** shadNet needs the registered casing of the Online ID and answers the same error as a wrong password. `sign_in` asks the backend for the registered casing; for an account the backend did not register (made with `create-account.sh` or an older launcher) the casing must be typed as registered, and such an account has no recovery code anyway. The friend commands accept any casing.
+13. **Several accounts on one server address.** The account belongs to the server it was created on, but `users.json` does not record which server: after changing the address the launcher tries the same account on the new server (and reports the sign-in error) until the player signs out.
