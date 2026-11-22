@@ -37,6 +37,12 @@ fn env_path(name: &str) -> Option<PathBuf> {
     std::env::var_os(name).filter(|v| !v.is_empty()).map(PathBuf::from)
 }
 
+/// The data folder as known before the application exists, for `single.rs`: `FZH_DATA_DIR`, else the
+/// identifier's folder in `%LOCALAPPDATA%`, where Tauri puts the application's local data.
+pub fn data_dir(identifier: &str) -> PathBuf {
+    env_path("FZH_DATA_DIR").unwrap_or_else(|| env_path("LOCALAPPDATA").unwrap_or_default().join(identifier))
+}
+
 impl Layout {
     pub fn resolve(default_data: PathBuf, resources: Option<PathBuf>) -> Layout {
         let data = env_path("FZH_DATA_DIR").unwrap_or(default_data);

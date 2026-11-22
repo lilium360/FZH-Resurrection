@@ -145,7 +145,10 @@ pub fn start(app: &AppHandle) -> Res<ShaderCacheState> {
     }
     w.cancel.store(false, Ordering::SeqCst);
     w.round.store(1, Ordering::SeqCst);
-    state.account.play_grant(&e);
+    if let Err(e) = state.account.play_grant(&e) {
+        w.active.store(false, Ordering::SeqCst);
+        return Err(e);
+    }
     state.account.suspend(&e);
     log(
         app,

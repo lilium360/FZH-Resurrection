@@ -64,6 +64,8 @@ pub struct Session {
 pub struct AccountState {
     pub session: Option<Session>,
     pub last_online_id: String,
+    /// The server's last answer to the launcher's sign-in was that the account is in use elsewhere.
+    pub in_use_elsewhere: bool,
 }
 
 /// The outcome of a registration. The account exists once the backend said so, so the code is
@@ -114,6 +116,7 @@ struct Inner {
     suspended: bool,
     status: Option<ServerStatus>,
     problem: String,
+    in_use: bool,
 }
 
 #[derive(Default)]
@@ -190,6 +193,16 @@ fn not_signed_in() -> BackendError {
     BackendError::new("not_signed_in", "backend.not_signed_in_short", "Sign in first.")
 }
 
+/// Why a launch or a warm-up is refused: the game's own sign-in would be refused the same way, and
+/// the game does not survive that.
+fn in_use_elsewhere() -> BackendError {
+    BackendError::new(
+        "already_signed_in",
+        "backend.account_in_use",
+        "This account is in use in another launcher, in a running game or on another PC. Close it there first, then try again.",
+    )
+}
+
 fn online_id_format() -> BackendError {
     BackendError::invalid("backend.online_id_format", "Online ID: 3 to 16 letters, digits, - and _.")
 }
@@ -220,6 +233,14 @@ impl Account {
     pub fn wake(&self) {
         *self.wake.0.lock().unwrap() = true;
         self.wake.1.notify_all();
+    }
+
+    /// The `account` event tells the UI when this changes.
+    fn set_in_use(&self, env: &EnvRef, in_use: bool) {
+        let before = std::mem::replace(&mut self.inner.lock().unwrap().in_use, in_use);
+        if before != in_use {
+            env.emit("account", serde_json::to_value(self.get_account(env)).unwrap_or(Value::Null));
+        }
     }
 
     fn on_event(env: &EnvRef, gen: u64, e: Event) {
@@ -301,6 +322,7 @@ impl Account {
             }
             conn.close();
         }
+        self.set_in_use(env, result.as_ref().is_err_and(shadnet::in_use_elsewhere));
         result
     }
 
@@ -323,7 +345,8 @@ impl Account {
     }
 
     pub fn get_account(&self, env: &EnvRef) -> AccountState {
-        AccountState { session: stored(env).map(|c| session(env, &c)), last_online_id: prefs(env).last_online_id }
+        let in_use_elsewhere = self.inner.lock().unwrap().in_use;
+        AccountState { session: stored(env).map(|c| session(env, &c)), last_online_id: prefs(env).last_online_id, in_use_elsewhere }
     }
 
     /// Stores the account for the emulator (`users.json`) and the launcher's preferences.
@@ -430,6 +453,7 @@ impl Account {
         let mut i = self.inner.lock().unwrap();
         i.friends = FriendsState::default();
         i.problem.clear();
+        i.in_use = false;
         emit_friends(env, &i.friends);
     }
 
@@ -607,9 +631,10 @@ impl Account {
 
     /// Before a launch, while the launcher still holds the session: a single-use code from shadNet,
     /// redeemed at the backend, which then accepts the game's login for this account from this
-    /// address. Never blocks the launch, since a backend in `open` mode does not need it; returns
-    /// the warning for the player when it failed.
-    pub fn play_grant(&self, env: &EnvRef) -> Option<Msg> {
+    /// address. A failure does not block the launch, since a backend in `open` mode does not need
+    /// the grant: it returns the warning for the player. Except when the launcher could not sign in
+    /// because the account is in use elsewhere, which is an error: the game could not sign in either.
+    pub fn play_grant(&self, env: &EnvRef) -> Res<Option<Msg>> {
         let result = (|| {
             let (conn, host) = self.ensure(env)?;
             let code = shadnet::authorization_code(&conn, &host, PLAY_CLIENT, PLAY_SCOPE)?;
@@ -622,21 +647,22 @@ impl Account {
                         .with("id", g.online_id)
                         .with("duration", error::seconds(g.expires_in)),
                 );
-                None
+                Ok(None)
             }
             Ok(Play::NotOffered) => {
                 env.log(Msg::new("log.event.playGrantNotOffered", "Network: this server does not ask the launcher to vouch for the player"));
-                None
+                Ok(None)
             }
+            Err(e) if shadnet::in_use_elsewhere(&e) => Err(in_use_elsewhere()),
             Err(e) => {
                 env.log(
                     Msg::new("log.event.playGrantFailed", format!("Network: the server did not confirm the account for this game: {}", e.message))
                         .with("reason", e.msg()),
                 );
-                Some(
+                Ok(Some(
                     Msg::new("backend.play_grant_failed", format!("The server did not confirm your account: {} The game starts anyway, but it may not sign in.", e.message))
                         .with("reason", e.msg()),
-                )
+                ))
             }
         }
     }
@@ -686,6 +712,9 @@ impl Account {
         }
         let status = self.server_status(env);
         let wanted = !self.inner.lock().unwrap().suspended && self.live_conn(&host).is_none() && stored(env).is_some();
+        if !status.network {
+            self.set_in_use(env, false);
+        }
         if !wanted || !status.network {
             return;
         }
@@ -911,6 +940,62 @@ mod tests {
         let e = pc.test.account.change_server(&pc.env, A, B, || panic!("settings must not be written")).unwrap_err();
         assert_eq!(e.code, "game_running");
         assert_eq!(pc.stored(), account_of("Synthetic_1", "pw-on-a"));
+    }
+
+    /// A shadNet server on this PC that answers the next `Login` with `error`; its address.
+    fn refusing_server(error: u8) -> String {
+        use std::io::{Read, Write};
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        std::thread::spawn(move || {
+            let (mut s, _) = listener.accept().unwrap();
+            let mut info = vec![packet::SERVER_INFO, 0, 0, 19, 0, 0, 0];
+            info.extend([0u8; 8]);
+            info.extend(packet::PROTOCOL_VERSION.to_le_bytes());
+            s.write_all(&info).unwrap();
+            let mut h = [0u8; packet::HEADER_SIZE];
+            s.read_exact(&mut h).unwrap();
+            let header = packet::Header::parse(&h);
+            assert_eq!(header.command, packet::LOGIN);
+            s.read_exact(&mut vec![0u8; header.payload_len().unwrap()]).unwrap();
+            let mut reply = packet::request(packet::LOGIN, header.id, &[error]);
+            reply[0] = packet::REPLY;
+            s.write_all(&reply).unwrap();
+        });
+        format!("127.0.0.1:{port}:40002:40003:40004:40005")
+    }
+
+    #[test]
+    fn an_account_in_use_elsewhere_stops_the_launch() {
+        let pc = Pc::new("in-use");
+        let server = refusing_server(6);
+        pc.go(A, &server);
+        pc.signed_in(&server, "Synthetic_1", "pw");
+        let e = pc.test.account.play_grant(&pc.env).unwrap_err();
+        assert_eq!((e.code, e.key), ("already_signed_in", "backend.account_in_use"));
+        let events = pc.test.events.lock().unwrap();
+        let (name, payload) = events.last().unwrap();
+        assert_eq!((name.as_str(), &payload["inUseElsewhere"], &payload["session"]["onlineId"]), ("account", &Value::Bool(true), &Value::from("Synthetic_1")));
+        drop(events);
+        pc.test.account.sign_out(&pc.env).unwrap();
+        assert!(!pc.test.account.get_account(&pc.env).in_use_elsewhere);
+    }
+
+    #[test]
+    fn any_other_failure_of_the_play_grant_is_only_a_warning() {
+        let pc = Pc::new("grant-warning");
+        let banned = refusing_server(5);
+        pc.go(A, &banned);
+        pc.signed_in(&banned, "Synthetic_1", "pw");
+        let warning = pc.test.account.play_grant(&pc.env).unwrap().unwrap();
+        assert_eq!((warning.key, warning.params["reason"]["key"].as_str()), ("backend.play_grant_failed", Some("backend.login_banned")));
+        let port = std::net::TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port();
+        let unreachable = format!("127.0.0.1:{port}:40002:40003:40004:40005");
+        pc.go(&banned, &unreachable);
+        pc.signed_in(&unreachable, "Synthetic_1", "pw");
+        let warning = pc.test.account.play_grant(&pc.env).unwrap().unwrap();
+        assert_eq!(warning.params["reason"]["key"], "backend.net_private_unreachable");
+        assert!(!pc.test.account.get_account(&pc.env).in_use_elsewhere);
     }
 
     #[test]

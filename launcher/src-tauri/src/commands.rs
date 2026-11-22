@@ -765,9 +765,9 @@ pub async fn launch_game(app: AppHandle) -> Res<Option<Msg>> {
         return Err(BackendError::new("busy", "backend.busy_preparing_game", "The launcher is busy preparing the game."));
     }
     let plan = blocking(&app, |a| {
-        let plan = prepare_launch(a, LaunchMode::Play)?;
         let account = &a.state::<AppState>().account;
-        let warning = account.play_grant(&env(a));
+        let warning = account.play_grant(&env(a))?;
+        let plan = prepare_launch(a, LaunchMode::Play)?;
         account.suspend(&env(a));
         Ok((plan, warning))
     })

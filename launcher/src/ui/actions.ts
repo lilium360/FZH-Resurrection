@@ -29,6 +29,7 @@ export async function launch(): Promise<void> {
     if (warning) toast(tr(warning), true);
   } catch (e) {
     app.run = false;
+    if (e instanceof BackendError && e.code === "already_signed_in") PR.elsewhere = true;
     log(logMsg("log.event.launchFailed", { reason: failure(e) }));
     toast(errorMessage(e), true);
     render();
@@ -247,6 +248,7 @@ export function discard(): void {
 /** The UI's side of being signed out; the back end already is. */
 export function signedOut(): void {
   PR.in = false;
+  PR.elsewhere = false;
   app.invites = [];
   app.friends = { friends: [], incoming: [], outgoing: [] };
   Object.assign(DP, { id: PR.id, av: PR.av, img: PR.img });
@@ -313,6 +315,7 @@ async function leaveServer(): Promise<void> {
 async function takeAccount(): Promise<void> {
   const a = await attempt(() => backend.getAccount());
   if (!a) return;
+  PR.elsewhere = a.inUseElsewhere;
   if (!a.session) {
     signedOut();
     return;

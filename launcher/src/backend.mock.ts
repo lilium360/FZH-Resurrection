@@ -196,7 +196,16 @@ export function createMockBackend(hooks: MockHooks): Backend {
     return session;
   };
 
+  /** An account whose name starts with `inuse` is held by another launcher: no launch, no warm-up. */
+  const inUse = (): boolean => !!session?.onlineId.toLowerCase().startsWith("inuse");
+  const accountInUse = () =>
+    err("already_signed_in", "backend.account_in_use", "This account is in use in another launcher, in a running game or on another PC. Close it there first, then try again.");
+
+  /** After a sign-in: the monitor's answer for an account in use elsewhere, and an invitation. */
   const scheduleInvite = () => {
+    window.setTimeout(() => {
+      if (session && inUse()) emit("account", { session: { ...session }, lastOnlineId: profile.onlineId, inUseElsewhere: true });
+    }, 1500);
     clearTimeout(inviteTimer);
     inviteTimer = window.setTimeout(() => {
       if (session && !running) emit("invite", { from: "Player2" });
@@ -208,7 +217,7 @@ export function createMockBackend(hooks: MockHooks): Backend {
     if (!session) return;
     log("log.event.accountRefused", `Network: the server no longer accepts the account ${session.onlineId}: signed out`, { id: session.onlineId });
     session = null;
-    emit("account", { session: null, lastOnlineId: profile.onlineId });
+    emit("account", { session: null, lastOnlineId: profile.onlineId, inUseElsewhere: false });
   };
 
   const startGame = () => {
@@ -450,6 +459,7 @@ export function createMockBackend(hooks: MockHooks): Backend {
     },
     async launchGame() {
       if (running) throw err("game_running", "backend.game_already_running", "The game is already running");
+      if (inUse()) throw accountInUse();
       if (!files.prepared) throw notReady();
       startGame();
       if (!session?.onlineId.toLowerCase().startsWith("nogrant")) return null;
@@ -472,6 +482,7 @@ export function createMockBackend(hooks: MockHooks): Backend {
       if (cache.status === "warming") throw err("busy", "backend.warmup_already", "The warm-up is already running");
       if (running) throw err("game_running", "backend.warmup_game", "Close the game first: the warm-up starts the game by itself.");
       requireSession();
+      if (inUse()) throw accountInUse();
       cache.status = "warming";
       cache.round = 1;
       const tick = () => {
@@ -505,7 +516,7 @@ export function createMockBackend(hooks: MockHooks): Backend {
     },
 
     async getAccount() {
-      return { session: session && { ...session }, lastOnlineId: profile.onlineId };
+      return { session: session && { ...session }, lastOnlineId: profile.onlineId, inUseElsewhere: inUse() };
     },
     async signIn(onlineId, recoveryCode) {
       if (!ONLINE_ID.test(onlineId.trim())) throw badOnlineId();
@@ -518,7 +529,7 @@ export function createMockBackend(hooks: MockHooks): Backend {
       scheduleInvite();
       return { ...session };
     },
-    /** Names starting with taken, admin, busy, closed or offline show those refusals; nosign creates the account but the sign-in fails; refused is turned away when its server is chosen again. */
+    /** Names starting with taken, admin, busy, closed or offline show those refusals; nosign creates the account but the sign-in fails; refused is turned away when its server is chosen again; inuse is held by another launcher. */
     async register(onlineId) {
       const id = onlineId.trim();
       if (!ONLINE_ID.test(id)) throw badOnlineId();

@@ -56,6 +56,9 @@ export const SCREENS: Record<ScreenId, () => string> = {
     if (F.prep === 2 && F.base && F.update)
       return (
         top +
+        (PR.in && PR.elsewhere && !app.run
+          ? `<div class="b-ready hold" role="status"><span class="nb">${I("alert", 14)}</span><div><b>${th("screen.play.accountInUse")}</b><small>${th("screen.play.accountInUseNote", { id: PR.id })}</small></div></div>`
+          : "") +
         `<div class="b-ready"><span class="nb">${I("check", 14)}</span><div><b>${th("screen.play.ready")}</b><small>${esc(recognised())}</small></div>${btn(`data-files ${app.run ? "disabled" : ""}`, "screen.play.changeFolder", "btn sm")}</div>
     <p class="b-note" style="margin:10px 2px 0">${th("screen.play.firewallNote")}</p>${installedRow()}${leftoverRows()}${logBox()}`
       );

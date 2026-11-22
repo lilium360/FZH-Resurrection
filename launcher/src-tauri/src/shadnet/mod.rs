@@ -80,6 +80,12 @@ pub fn login_error(code: u8) -> BackendError {
     }
 }
 
+/// shadNet answered a `Login` with `LoginAlreadyLoggedIn` (6): the account has a session already,
+/// in another launcher, in a game or on another PC, and the game's own login would get the same answer.
+pub fn in_use_elsewhere(e: &BackendError) -> bool {
+    e.code == "already_signed_in"
+}
+
 pub fn friend_error(command: u16, code: u8) -> BackendError {
     match (command, code) {
         (packet::ADD_FRIEND, 26) => BackendError::new("not_found", "backend.friend_not_found", "No player with that Online ID."),
@@ -174,6 +180,9 @@ mod tests {
     fn error_codes_become_contract_codes() {
         assert_eq!(login_error(8).code, "wrong_password");
         assert_eq!(login_error(6).code, "already_signed_in");
+        assert!(in_use_elsewhere(&login_error(6)));
+        assert!(!(0..=u8::MAX).any(|c| c != 6 && in_use_elsewhere(&login_error(c))), "only the answer 6");
+        assert!(!in_use_elsewhere(&net_error("10.0.0.1", &NetError::Timeout)));
         assert_eq!(login_error(5).code, "unauthorized");
         assert_eq!(friend_error(packet::ADD_FRIEND, 26).code, "not_found");
         assert_eq!(friend_error(packet::ADD_FRIEND, 28).code, "already_friend");

@@ -20,6 +20,7 @@ mod report;
 mod settings;
 mod sfo;
 pub mod shadnet;
+mod single;
 mod store;
 mod update;
 pub mod users;
@@ -105,8 +106,20 @@ pub fn env(app: &AppHandle) -> account::EnvRef {
     Arc::new(TauriEnv(app.clone()))
 }
 
+/// Another start of the launcher on this data folder asked for the one that runs (`single.rs`).
+fn show_window(app: &AppHandle) {
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.unminimize();
+        let _ = window.show();
+        let _ = window.set_focus();
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    let context = tauri::generate_context!();
+    let Some(instance) = single::claim(&layout::data_dir(&context.config().identifier), single::HANDOVER) else { return };
+    let wake = instance.wake();
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
@@ -126,6 +139,8 @@ pub fn run() {
                 updates: update::Updates::default(),
             });
             account::Account::start_monitor(env(app.handle()));
+            let handle = app.handle().clone();
+            wake.listen(move || show_window(&handle));
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -175,7 +190,7 @@ pub fn run() {
             commands::start_hosting,
             commands::stop_hosting,
         ])
-        .build(tauri::generate_context!())
+        .build(context)
         .expect("error while building the launcher")
         .run(|app, event| {
             if let tauri::RunEvent::Exit = event {

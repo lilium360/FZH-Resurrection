@@ -214,6 +214,8 @@ export interface Session {
 export interface AccountState {
   session: Session | null;
   lastOnlineId: string;
+  /** The server answered the launcher's last sign-in with "already signed in": another launcher, a game or another PC holds the account, and a launch is refused. */
+  inUseElsewhere: boolean;
 }
 
 /** The account exists once this arrives: the code is shown once, even when `problem` says that storing it on this PC or signing in failed. */
@@ -362,7 +364,7 @@ export interface BackendEvents {
   "install-progress": InstallProgress;
   "cache-progress": ShaderCacheState;
   friends: FriendsState;
-  /** The server refused the stored account and the launcher signed it out. */
+  /** The server refused the stored account and the launcher signed it out (`session` null), or `inUseElsewhere` changed. */
   account: AccountState;
   invite: Invite;
   hosting: HostingState;

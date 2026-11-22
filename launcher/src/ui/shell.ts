@@ -48,7 +48,9 @@ export function shell(): string {
           : th("shell.tipChooseFolder", screenParam("play"))
         : !PR.in
           ? th("shell.tipSignIn", screenParam("profile"))
-          : "";
+          : PR.elsewhere
+            ? th("shell.tipAccountInUse")
+            : "";
   const side = `<h6 class="b-mh">${th("shell.mainMenu")}</h6><nav class="b-nav">${MENU.map(
     (n) => `${n[2] ? `<h6>${th(`nav.menuGroup.${n[2]}`)}</h6>` : ""}<button class="${app.scr === n[0] ? "on" : ""}" data-go="${n[0]}">${I(n[1], 17)}${th(`nav.menu.${n[0]}`)}${n[0] === "friends" ? badge : ""}</button>`,
   ).join("")}</nav>
@@ -57,7 +59,7 @@ export function shell(): string {
         <button class="b-chip" data-go="profile" data-tip="${PR.in ? th(app.run ? "shell.inGame" : "presence.online") : th("shell.signInFromProfile")}">${PR.in ? avatar(DP) : `<span class="av">${I("user", 11)}</span>`}<span class="tx">${PR.in ? esc(DP.id || PR.id) : th("screen.profile.signInBtn")}</span></button>
         <button class="b-svc ${srv[0]}" data-go="advanced" data-tip="${srv[1]}" aria-label="${srv[1]}">${I("globe", 14)}</button>
       </div>
-      <button class="b-go b-side-go ${app.run ? "run" : ""}" data-act="play" ${app.run || canPlay() ? "" : "disabled"} data-tip="${tip}">${I(app.run ? "stop" : "play", 17)}${th(app.run ? "shell.stop" : "shell.play")}</button>
+      <button class="b-go b-side-go ${app.run ? "run" : PR.in && PR.elsewhere ? "hold" : ""}" data-act="play" ${app.run || canPlay() ? "" : "disabled"} data-tip="${tip}">${I(app.run ? "stop" : "play", 17)}${th(app.run ? "shell.stop" : "shell.play")}</button>
     </div>`;
   return `<div class="b-body"><aside class="b-side">${side}</aside><main class="b-main">${SCREENS[app.scr]()}${saveBar()}</main></div>`;
 }

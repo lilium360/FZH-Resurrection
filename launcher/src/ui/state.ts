@@ -41,6 +41,8 @@ export const PR = {
   img: null as string | null,
   email: "",
   newf: "",
+  /** Another launcher, a game or another PC holds the account: a launch is refused until it lets go. */
+  elsewhere: false,
 };
 
 export const DP = { id: "", av: 0 as AvatarChoice, img: null as string | null };

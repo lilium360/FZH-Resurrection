@@ -72,7 +72,12 @@ async function subscribe(backend: Backend): Promise<void> {
       render();
     }),
     backend.on("account", (a) => {
-      if (a.session || !PR.in) return;
+      if (a.session || !PR.in) {
+        if (PR.elsewhere === a.inUseElsewhere) return;
+        PR.elsewhere = a.inUseElsewhere;
+        render();
+        return;
+      }
       signedOut();
       toast(t("toast.accountRefused", { id: PR.id }), true);
       refresh();
@@ -125,6 +130,7 @@ async function boot(): Promise<void> {
   UPD.cur = info.launcherVersion;
   PR.id = account.lastOnlineId;
   DP.id = account.lastOnlineId;
+  PR.elsewhere = account.inUseElsewhere;
   if (account.session) {
     applySession(account.session);
     syncAvatar();

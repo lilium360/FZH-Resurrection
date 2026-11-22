@@ -136,6 +136,7 @@ code,.code{font-family:var(--mono);font-size:11.5px;color:var(--t2)}
 .b-play{display:flex;align-items:center;gap:10px;margin-top:28px}
 .b-go{display:inline-flex;align-items:center;justify-content:center;gap:10px;height:48px;width:196px;border-radius:9px;border:0;background:var(--acc);color:var(--acc-ink);font-size:16px;font-weight:900;letter-spacing:.08em}
 .b-go.run{background:var(--tx);color:var(--ink)}
+.b-go.hold{background:rgba(255,129,86,.15);color:var(--coral)}
 .b-play .sel{height:48px;border-radius:9px;padding:0 12px 0 14px;flex-direction:column;align-items:flex-start;justify-content:center;gap:0;line-height:1.25}
 .b-play .sel small{font-size:10.5px;color:var(--t3);font-weight:550} .b-play .sel b{font-size:12.5px;font-weight:650}
 .b-h2{display:flex;align-items:baseline;gap:10px;margin:30px 0 12px;font-size:13px;font-weight:700} .b-h2 span{color:var(--t3);font-weight:500;font-size:12px}
@@ -326,6 +327,7 @@ code,.code{font-family:var(--mono);font-size:11.5px;color:var(--t2)}
 .b-chk small.warn{color:var(--coral)}
 .b-ready{display:flex;align-items:center;gap:12px;margin-top:14px;padding:12px 16px;border-radius:10px;background:var(--s1);border:1px solid var(--ln)}
 .b-ready .nb{width:28px;height:28px;border-radius:50%;display:grid;place-items:center;background:rgba(85,207,150,.14);color:var(--ok);flex:none}
+.b-ready.hold{border-color:rgba(255,129,86,.45)} .b-ready.hold .nb{background:rgba(255,129,86,.15);color:var(--coral)}
 .b-ready>div{flex:1;min-width:0}
 .b-ready b{display:block;font-size:13px}
 .b-ready small{color:var(--t3);font-size:12px}
