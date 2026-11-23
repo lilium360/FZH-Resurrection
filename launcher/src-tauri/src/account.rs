@@ -520,6 +520,59 @@ impl Account {
         Ok(())
     }
 
+    /// The community server moved from one of `former` to `current` with its accounts: what this
+    /// PC keeps for the old address (the `accounts.json` entry, the Credential Manager's password)
+    /// follows to the new one, and the account stays the one in `users.json` when the community
+    /// server is in use. Nothing happens when the new address has an account of its own, or for a
+    /// former address that is the private server of the settings. The password is written under
+    /// the new name before the old entry goes, so a start that ends half-way is finished by the next.
+    pub fn carry_over(&self, env: &EnvRef, current: &str, former: &[&str]) {
+        let _g = self.connect.lock().unwrap();
+        let settings = store::load_settings(&env.layout().settings_json());
+        let in_use = settings.server() == current;
+        let to = vault::server_key(current);
+        for old in former {
+            let from = vault::server_key(old);
+            if from == to || (!settings.private_server.is_empty() && vault::server_key(&settings.private_server) == from) {
+                continue;
+            }
+            let known = accounts::load(&env.layout().accounts_json());
+            let active = if in_use { stored(env) } else { None };
+            let candidates: Vec<(String, String)> = match &active {
+                Some(c) => vec![(c.npid.clone(), c.email.clone())],
+                None => [known.get(old), known.get(current)].into_iter().flatten().map(|r| (r.online_id.clone(), r.email.clone())).collect(),
+            };
+            let moving = candidates.into_iter().find_map(|(id, email)| Some((env.vault().get(&vault::target(old, &id))?, id, email)));
+            let Some((password, id, email)) = moving else { continue };
+            if known.get(current).is_some_and(|r| !r.online_id.eq_ignore_ascii_case(&id)) {
+                continue;
+            }
+            let target = vault::target(current, &id);
+            let written = match env.vault().get(&target) {
+                Some(there) => there == password,
+                None => env.vault().set(&target, &id, &password).is_ok() && env.vault().get(&target).as_ref() == Some(&password),
+            };
+            if !written {
+                continue;
+            }
+            let remembered = edit_remembered(env, |a| {
+                a.forget(old);
+                a.remember(current, &id, &email);
+            });
+            let email = if email.is_empty() { registered_email(&id) } else { email };
+            let c = Credentials { npid: id, password, email };
+            if remembered.is_err() || (in_use && active.is_none() && edit_users(env, |v| users::set_account(v, &c)).is_err()) {
+                continue;
+            }
+            env.vault().delete(&vault::target(old, &c.npid));
+            env.log(
+                Msg::new("log.event.accountCarriedOver", format!("Network: the community server has moved, the account {} moved with it", c.npid))
+                    .with("id", c.npid),
+            );
+            return;
+        }
+    }
+
     /// The server answered that the stored account's Online ID or password is wrong: the account
     /// is gone there, or it was never this server's. Signed out and forgotten, so that the monitor
     /// does not try it again every round; the `account` event tells the UI.
@@ -750,17 +803,22 @@ impl Account {
 mod tests {
     use super::*;
     use crate::settings::Settings;
-    use std::collections::HashMap;
+    use std::collections::{BTreeMap, HashMap};
     use std::path::PathBuf;
+    use std::sync::atomic::{AtomicBool, Ordering};
 
+    /// The second field makes it refuse what it is asked to keep.
     #[derive(Default)]
-    struct MemoryVault(Mutex<HashMap<String, String>>);
+    struct MemoryVault(Mutex<HashMap<String, String>>, AtomicBool);
 
     impl Vault for MemoryVault {
         fn get(&self, target: &str) -> Option<String> {
             self.0.lock().unwrap().get(target).cloned()
         }
         fn set(&self, target: &str, _: &str, secret: &str) -> Res<()> {
+            if self.1.load(Ordering::Relaxed) {
+                return Err(BackendError::internal("refused"));
+            }
             self.0.lock().unwrap().insert(target.into(), secret.into());
             Ok(())
         }
@@ -828,6 +886,25 @@ mod tests {
 
         fn stored(&self) -> Option<(String, String)> {
             credentials(&self.env).map(|c| (c.npid, c.password))
+        }
+
+        /// The community server is now at `default_server()` and was at `former` before.
+        fn moved(&self, former: &[&str]) {
+            self.test.account.carry_over(&self.env, crate::settings::default_server(), former);
+        }
+
+        fn remembered(&self, server: &str) -> Option<String> {
+            accounts::load(&self.test.layout.accounts_json()).get(server).map(|r| r.online_id.clone())
+        }
+
+        fn password(&self, server: &str, npid: &str) -> Option<String> {
+            self.test.vault.get(&vault::target(server, npid))
+        }
+
+        /// Everything a move of the community server may touch.
+        fn kept(&self) -> (BTreeMap<String, String>, String, Option<Credentials>) {
+            let vault = self.test.vault.0.lock().unwrap().clone().into_iter().collect();
+            (vault, std::fs::read_to_string(self.test.layout.accounts_json()).unwrap_or_default(), stored(&self.env))
         }
     }
 
@@ -940,6 +1017,109 @@ mod tests {
         let e = pc.test.account.change_server(&pc.env, A, B, || panic!("settings must not be written")).unwrap_err();
         assert_eq!(e.code, "game_running");
         assert_eq!(pc.stored(), account_of("Synthetic_1", "pw-on-a"));
+    }
+
+    const OLD: &str = "old.example:40001:40002:40003:40004:40005";
+
+    #[test]
+    fn the_account_follows_the_community_server_to_its_new_address() {
+        let pc = Pc::new("moved");
+        let new = crate::settings::default_server();
+        pc.signed_in(OLD, "Synthetic_1", "pw");
+        pc.moved(&[]);
+        assert_eq!((pc.password(OLD, "Synthetic_1").as_deref(), pc.remembered(new)), (Some("pw"), None), "no former address: nothing moves");
+        pc.moved(&["older.example", OLD]);
+        assert_eq!(pc.stored(), account_of("Synthetic_1", "pw"));
+        assert_eq!((pc.password(new, "Synthetic_1").as_deref(), pc.password(OLD, "Synthetic_1")), (Some("pw"), None));
+        assert_eq!((pc.remembered(new).as_deref(), pc.remembered(OLD)), (Some("Synthetic_1"), None));
+        let after = pc.kept();
+        pc.moved(&["older.example", OLD]);
+        assert_eq!(pc.kept(), after, "the second start changes nothing");
+        pc.go(new, B);
+        pc.go(B, new);
+        assert_eq!(pc.stored(), account_of("Synthetic_1", "pw"));
+    }
+
+    #[test]
+    fn an_account_of_the_new_address_stays_as_it_is() {
+        let pc = Pc::new("moved-occupied");
+        let new = crate::settings::default_server();
+        pc.signed_in(OLD, "Synthetic_1", "pw-old");
+        pc.signed_in(new, "Synthetic_1", "pw-new");
+        let before = pc.kept();
+        pc.moved(&[OLD]);
+        assert_eq!(pc.kept(), before, "the same Online ID with another password");
+        pc.go(OLD, B);
+        pc.go(B, new);
+        pc.signed_in(new, "Other_2", "pw-2");
+        pc.go(new, B);
+        let before = pc.kept();
+        pc.moved(&[OLD]);
+        assert_eq!(pc.kept(), before, "another account remembered for the new address");
+        pc.go(B, new);
+        pc.moved(&[OLD]);
+        assert_eq!(pc.stored(), account_of("Other_2", "pw-2"));
+        assert_eq!(pc.password(OLD, "Synthetic_1").as_deref(), Some("pw-old"));
+    }
+
+    #[test]
+    fn a_move_that_stopped_half_way_is_finished_and_never_loses_the_password() {
+        let pc = Pc::new("moved-half");
+        let new = crate::settings::default_server();
+        pc.signed_in(OLD, "Synthetic_1", "pw");
+        pc.test.vault.1.store(true, Ordering::Relaxed);
+        let before = pc.kept();
+        pc.moved(&[OLD]);
+        assert_eq!(pc.kept(), before, "the Credential Manager refuses the new entry: the old one stays");
+        pc.test.vault.1.store(false, Ordering::Relaxed);
+        pc.test.vault.set(&vault::target(new, "Synthetic_1"), "Synthetic_1", "pw").unwrap();
+        pc.moved(&[OLD]);
+        assert_eq!((pc.password(new, "Synthetic_1").as_deref(), pc.password(OLD, "Synthetic_1")), (Some("pw"), None));
+        assert_eq!((pc.remembered(new).as_deref(), pc.stored()), (Some("Synthetic_1"), account_of("Synthetic_1", "pw")));
+
+        let pc = Pc::new("moved-half-signed-out");
+        pc.test.vault.set(&vault::target(OLD, "Synthetic_1"), "Synthetic_1", "pw").unwrap();
+        pc.test.vault.set(&vault::target(new, "Synthetic_1"), "Synthetic_1", "pw").unwrap();
+        edit_remembered(&pc.env, |a| a.remember(new, "Synthetic_1", "")).unwrap();
+        pc.moved(&[OLD]);
+        assert_eq!(pc.stored(), account_of("Synthetic_1", "pw"), "stopped before users.json");
+        assert_eq!(pc.password(OLD, "Synthetic_1"), None);
+    }
+
+    #[test]
+    fn on_a_private_server_the_community_account_moves_for_later() {
+        let pc = Pc::new("moved-private");
+        let new = crate::settings::default_server();
+        pc.signed_in(OLD, "Synthetic_1", "pw-community");
+        pc.go(OLD, B);
+        pc.signed_in(B, "Synthetic_1", "pw-private");
+        pc.moved(&[OLD]);
+        assert_eq!(pc.stored(), account_of("Synthetic_1", "pw-private"), "the private server keeps its own account");
+        assert_eq!((pc.remembered(new).as_deref(), pc.remembered(OLD)), (Some("Synthetic_1"), None));
+        assert_eq!((pc.password(new, "Synthetic_1").as_deref(), pc.password(OLD, "Synthetic_1")), (Some("pw-community"), None));
+        let after = pc.kept();
+        pc.moved(&[OLD]);
+        assert_eq!(pc.kept(), after);
+        pc.go(B, new);
+        assert_eq!(pc.stored(), account_of("Synthetic_1", "pw-community"));
+    }
+
+    #[test]
+    fn a_private_server_at_a_former_address_is_not_the_community_server() {
+        let pc = Pc::new("moved-not-private");
+        let new = crate::settings::default_server();
+        pc.go(A, OLD);
+        pc.signed_in(OLD, "Synthetic_1", "pw");
+        let before = pc.kept();
+        pc.moved(&[OLD]);
+        assert_eq!(pc.kept(), before, "in use as the private server");
+        let off = Settings { private_server: OLD.into(), ..Settings::default() };
+        let path = pc.test.layout.settings_json();
+        pc.test.account.change_server(&pc.env, OLD, new, || store::save_settings(&path, &off)).unwrap();
+        let before = pc.kept();
+        pc.moved(&[OLD]);
+        assert_eq!(pc.kept(), before, "remembered for the private server that is turned off");
+        assert_eq!((pc.remembered(OLD).as_deref(), pc.stored()), (Some("Synthetic_1"), None));
     }
 
     /// A shadNet server on this PC that answers the next `Login` with `error`; its address.

@@ -13,6 +13,17 @@ pub fn default_server() -> &'static str {
     }
 }
 
+/// The addresses the community server had before it moved, fixed at build time by
+/// `FZH_FORMER_SERVERS`: separated by commas, each without its relay part. An account kept for one
+/// of them follows to `default_server()` (`Account::carry_over`).
+pub fn former_servers() -> Vec<&'static str> {
+    former_list(option_env!("FZH_FORMER_SERVERS").unwrap_or_default())
+}
+
+fn former_list(list: &str) -> Vec<&str> {
+    list.split(',').map(str::trim).filter(|a| !a.contains('/') && Server::parse(a).is_some()).collect()
+}
+
 /// "community server" for the build-time default, else "private server <address>".
 pub fn server_name(host: &str) -> Msg {
     if host == default_server() {
@@ -520,6 +531,16 @@ mod tests {
         assert!(official.params.is_empty());
         let private = server_name("10.1.2.3");
         assert_eq!((private.key, private.params["address"].as_str()), ("server.private", Some("10.1.2.3")));
+    }
+
+    #[test]
+    fn former_servers_are_a_list_of_addresses_without_relays() {
+        assert!(former_list("").is_empty());
+        assert_eq!(former_list("old.example"), vec!["old.example"]);
+        assert_eq!(
+            former_list("old.example:40001:40002:40003:40004:40005, 203.0.113.7,,a b,old.example:1,older.example/relay.example"),
+            vec!["old.example:40001:40002:40003:40004:40005", "203.0.113.7"]
+        );
     }
 
     #[test]

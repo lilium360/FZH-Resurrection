@@ -55,8 +55,8 @@ fn local_host(host: &str) -> bool {
     host == "localhost" || host.parse::<IpAddr>().is_ok_and(|a| a.is_loopback() || a.is_unspecified())
 }
 
-/// The hosts this PC knows as servers: the private server and its relays, the community server,
-/// the servers an account is remembered for. Longest first, so that no host is cut at a shorter one.
+/// The hosts this PC knows as servers: the private server and its relays, the community server
+/// and its former addresses, the servers an account is remembered for. Longest first, so that no host is cut at a shorter one.
 fn named_hosts(layout: &Layout) -> Vec<Named> {
     let mut named: Vec<Named> = Vec::new();
     let mut add = |host: &str, marker: String| {
@@ -74,6 +74,9 @@ fn named_hosts(layout: &Layout) -> Vec<Named> {
         }
     }
     add(&Server::of(settings::default_server()).host, "[community server]".into());
+    for former in settings::former_servers() {
+        add(&Server::of(former).host, "[former community server]".into());
+    }
     for (n, host) in accounts::load(&layout.accounts_json()).hosts().iter().enumerate() {
         add(host, format!("[server {}]", n + 1));
     }

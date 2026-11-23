@@ -63,7 +63,9 @@ Without `-Publish` the script stops after writing the installer, its `.sig` and 
    ```
 
    `TAURI_SIGNING_PRIVATE_KEY` takes the path of the key file or its content. See
-   [building.md](building.md) for `FZH_DEFAULT_SERVER`. The installer's source link points at the
+   [building.md](building.md) for `FZH_DEFAULT_SERVER`. When the community server has moved, also
+   set `FZH_FORMER_SERVERS` to its former address (`-FormerServers` of the script), so that players
+   stay signed in. The installer's source link points at the
    repository; the GPL requires the corresponding source to be offered with the binaries, which the
    tag `v<version>` of the release commit does (Publishing, below), so build from that commit.
 4. In `launcher/src-tauri/target/release/bundle/nsis/`:

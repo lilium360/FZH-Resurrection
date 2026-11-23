@@ -483,6 +483,7 @@
       "accountCreated": "Account {id} creato sul {server}",
       "signedOut": "Disconnesso",
       "accountRemembered": "Di nuovo sul {server} come {id}",
+      "accountCarriedOver": "Il server della community si è spostato. Il tuo account {id} è stato trasferito.",
       "accountRefused": "Il server non accetta più l'account {id}. Disconnesso.",
       "handoverToGame": "Launcher disconnesso perché possa accedere il gioco",
       "launcherNotSignedIn": "Launcher non connesso: {reason}",

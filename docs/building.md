@@ -59,6 +59,7 @@ licence texts. The NSIS installer ends up in `src-tauri/target/release/bundle/ns
 | Build-time variable | Default | Effect |
 |---|---|---|
 | `FZH_DEFAULT_SERVER` | `127.0.0.1` | Server address used when "Use a private server" is off (format below). Never shown in the UI. An address that does not parse falls back to `127.0.0.1`. |
+| `FZH_FORMER_SERVERS` | empty | Addresses the community server had before it moved, separated by commas, each as `host` or `host:game:matching:webapi:backend:relay` without a relay part (the build stops on a `/`). The account a player has for one of them follows to `FZH_DEFAULT_SERVER` at the next start, without the recovery code. Never shown in the UI. An address that does not parse is skipped. |
 | `FZH_EMULATOR_BUILD` | `emulator/build/win` | Folder holding `shadps4.exe`. |
 | `FZH_EMULATOR_SOURCE` | `emulator` | Source tree for the commit and the licence files. |
 | `FZH_VC_CRT` | newest local `Microsoft.VC14x.CRT` | Folder with the x64 Visual C++ runtime DLLs. |
@@ -73,6 +74,16 @@ in no file of the repo. It takes the same address a player types for a private s
   machine (port 31316 when omitted; the relay port of the first part is then unused);
 - either form followed by `/` and up to 8 relays separated by `,` (relays in several regions,
   [self-hosting.md](self-hosting.md#hosting-only-a-relay)).
+
+When the community server moves to another address with its accounts, build with the old address
+in `FZH_FORMER_SERVERS` (it, too, is in no file of the repo), for as long as players may still
+update from a launcher built for it:
+
+```
+set FZH_DEFAULT_SERVER=play.example:40001:40002:40003:40004:40005
+set FZH_FORMER_SERVERS=203.0.113.10
+npm run tauri build
+```
 
 The link behind About > Source code and in `licences/README.txt` is fixed to
 https://github.com/lilium360/FZH-Resurrection (`src-tauri/src/commands.rs`,

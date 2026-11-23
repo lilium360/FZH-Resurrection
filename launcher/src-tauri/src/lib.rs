@@ -138,7 +138,9 @@ pub fn run() {
                 install: install::Installer::default(),
                 updates: update::Updates::default(),
             });
-            account::Account::start_monitor(env(app.handle()));
+            let session = env(app.handle());
+            session.account().carry_over(&session, settings::default_server(), &settings::former_servers());
+            account::Account::start_monitor(session);
             let handle = app.handle().clone();
             wake.listen(move || show_window(&handle));
             Ok(())

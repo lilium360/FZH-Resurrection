@@ -483,6 +483,7 @@
       "accountCreated": "Account {id} created on the {server}",
       "signedOut": "Signed out",
       "accountRemembered": "Back on the {server} as {id}",
+      "accountCarriedOver": "The community server has moved. Your account {id} has been carried over.",
       "accountRefused": "The server no longer accepts the account {id}. Signed out.",
       "handoverToGame": "Launcher signed out so the game can sign in",
       "launcherNotSignedIn": "Launcher not signed in: {reason}",

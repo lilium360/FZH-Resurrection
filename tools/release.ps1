@@ -4,12 +4,14 @@
 # and the GitHub CLI (gh) signed in for -Publish.
 #
 #   powershell -ExecutionPolicy Bypass -File tools\release.ps1 -Server <public server address>
-#              -Notes "First public release" [-Publish]
+#              -Notes "First public release" [-FormerServers <former address>] [-Publish]
 #
 # The private key is TAURI_SIGNING_PRIVATE_KEY (a path or the key itself), else
 # %USERPROFILE%\.tauri\fzh-resurrection.key.
 #
 # -Server   compiled in as FZH_DEFAULT_SERVER (docs\building.md); it is written to no file
+# -FormerServers  optional, compiled in as FZH_FORMER_SERVERS: the addresses the community server
+#           had before it moved, separated by commas, so that players stay signed in
 # -Notes    one change per line; shown by the launcher under About > What's new
 # -Publish  tag v<version>, push it and create the release with the installer, its .sig and latest.json
 #
@@ -20,6 +22,7 @@
 #   powershell -ExecutionPolicy Bypass -File tools\release.ps1 -StorePassword
 #   powershell -ExecutionPolicy Bypass -File tools\release.ps1 -ForgetPassword
 param([Parameter(Mandatory = $true, ParameterSetName = 'Release')][string]$Server,
+      [Parameter(ParameterSetName = 'Release')][string]$FormerServers,
       [Parameter(Mandatory = $true, ParameterSetName = 'Release')][string]$Notes,
       [Parameter(ParameterSetName = 'Release')][switch]$Publish,
       [Parameter(Mandatory = $true, ParameterSetName = 'Store')][switch]$StorePassword,
@@ -117,6 +120,7 @@ if (-not $env:TAURI_SIGNING_PRIVATE_KEY_PASSWORD) {
     $typed = $true
 }
 $env:FZH_DEFAULT_SERVER = $Server
+$env:FZH_FORMER_SERVERS = $FormerServers
 try {
     Push-Location $launcher
     npm ci
@@ -126,6 +130,7 @@ try {
 } finally {
     Pop-Location
     Remove-Item Env:FZH_DEFAULT_SERVER
+    Remove-Item Env:FZH_FORMER_SERVERS -ErrorAction SilentlyContinue
     if ($typed) { Remove-Item Env:TAURI_SIGNING_PRIVATE_KEY_PASSWORD }
 }
 
