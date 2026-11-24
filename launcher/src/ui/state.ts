@@ -11,6 +11,7 @@ import {
   type InstallInfo,
   type InstallPlan,
   type InstallProgress,
+  type RelayList,
   type Leftover,
   type Msg,
   type ServerStatus,
@@ -119,6 +120,9 @@ export const UPD = {
   prog: null as UpdateProgress | null,
   err: null as Msg | null,
 };
+
+/** The relay list of `server` ("" for the community server). data: undefined until the first answer, null when the server has no list; failed: the last request got no answer; asked: when the last request started. */
+export const RELAYS = { server: "", data: undefined as RelayList | null | undefined, failed: false, asked: 0, busy: false };
 
 export const ts = (): string => new Date().toTimeString().slice(0, 8);
 

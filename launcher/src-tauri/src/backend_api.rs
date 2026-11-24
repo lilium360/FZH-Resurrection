@@ -1,11 +1,12 @@
 //! The backend's account API on the backend port of the server address (docs/launcher-contract.md,
-//! "Backend account API"): registration, the registered casing of a name, the play grant. Plain
-//! HTTP/1.1, one request per connection.
+//! "Backend account API"): registration, the registered casing of a name, the play grant; and the
+//! relay list with its status ("Relay status"). Plain HTTP/1.1, one request per connection.
 
 use crate::error::{self, BackendError, Res};
 use crate::instance::Server;
 use crate::settings::server_name;
 use crate::shadnet::connection;
+use serde::Serialize;
 use serde_json::{json, Value};
 use std::io::{Read, Write};
 use std::time::Duration;
@@ -141,6 +142,50 @@ pub fn play(server: &str, code: &str) -> Res<Play> {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct Relay {
+    pub region: String,
+    pub location: String,
+    pub operator: String,
+    /// `None`: the server has not checked it yet.
+    pub online: Option<bool>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RelayList {
+    pub checked_at: Option<String>,
+    pub relays: Vec<Relay>,
+}
+
+/// What the screen shows of a list, whatever a server sends.
+const MAX_RELAYS: usize = 64;
+const MAX_RELAY_TEXT: usize = 64;
+
+/// The relays the server lists and what its own last check found: the launcher never asks a
+/// relay. `None` when the server publishes no list (an older backend, or one without a list).
+pub fn relays(server: &str) -> Res<Option<RelayList>> {
+    let unavailable = || {
+        let name = server_name(server);
+        BackendError::new("server_unreachable", "backend.relays_unavailable", format!("Cannot get the relay status from the {}.", name.message))
+            .with("server", name)
+    };
+    let r = call(server, "GET", "/status/v1/relays", None).map_err(|_| unavailable())?;
+    let text = |v: &Value| v.as_str().unwrap_or("").chars().take(MAX_RELAY_TEXT).collect::<String>();
+    match (r.status, r.body["relays"].as_array()) {
+        (404, _) => Ok(None),
+        (200, Some(list)) => Ok(Some(RelayList {
+            checked_at: r.body["checkedAt"].as_str().map(|_| text(&r.body["checkedAt"])),
+            relays: list
+                .iter()
+                .take(MAX_RELAYS)
+                .map(|e| Relay { region: text(&e["region"]), location: text(&e["location"]), operator: text(&e["operator"]), online: e["online"].as_bool() })
+                .collect(),
+        })),
+        _ => Err(unavailable()),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -234,5 +279,43 @@ mod tests {
         assert!(seen[1].starts_with("GET /account/v1/names/PLAYER_1 HTTP/1.1\r\n"));
         assert!(seen[3].ends_with(r#"{"code":"c0de"}"#));
         assert_eq!(play(&server, "c0de").unwrap_err().key, "backend.account_unreachable");
+    }
+
+    #[test]
+    fn relay_lists() {
+        let (server, handle) = backend(&[
+            "HTTP/1.1 200 OK\r\n\r\n{\"checkedAt\": \"2026-11-24T08:00:00.000Z\", \"relays\": [{\"region\": \"Europe\", \"location\": \"Stockholm, Sweden\", \"operator\": \"someone\", \"online\": true}, {\"region\": \"Asia\", \"online\": false, \"address\": \"relay.example.org\"}, {\"region\": 5, \"online\": null}, 7]}",
+            "HTTP/1.1 200 OK\r\n\r\n{\"checkedAt\": null, \"relays\": []}",
+            "HTTP/1.1 404 Not Found\r\n\r\n{\"error\": \"not_found\"}",
+            "HTTP/1.1 404 Not Found\r\n\r\n{\"code\": 141, \"error\": \"not implemented\"}",
+            "HTTP/1.1 429 Too Many Requests\r\n\r\n{\"error\": \"rate_limited\", \"retryAfter\": 9}",
+            "HTTP/1.1 200 OK\r\n\r\n{\"relays\": \"none\"}",
+            "HTTP/1.1 200 OK\r\n\r\nnot json",
+        ]);
+        let relay = |region: &str, location: &str, operator: &str, online| Relay { region: region.into(), location: location.into(), operator: operator.into(), online };
+        let list = relays(&server).unwrap().unwrap();
+        assert_eq!(list.checked_at.as_deref(), Some("2026-11-24T08:00:00.000Z"));
+        assert_eq!(list.relays, [relay("Europe", "Stockholm, Sweden", "someone", Some(true)), relay("Asia", "", "", Some(false)), relay("", "", "", None), relay("", "", "", None)]);
+        assert_eq!(serde_json::to_value(&list).unwrap()["relays"][1], json!({"region": "Asia", "location": "", "operator": "", "online": false}));
+        assert_eq!(serde_json::to_value(&list).unwrap()["checkedAt"], "2026-11-24T08:00:00.000Z");
+        assert_eq!(relays(&server).unwrap(), Some(RelayList { checked_at: None, relays: vec![] }));
+        assert_eq!(relays(&server).unwrap(), None);
+        assert_eq!(relays(&server).unwrap(), None);
+        for _ in 0..3 {
+            let e = relays(&server).unwrap_err();
+            assert_eq!((e.code, e.key), ("server_unreachable", "backend.relays_unavailable"));
+        }
+        assert!(handle.join().unwrap()[0].starts_with("GET /status/v1/relays HTTP/1.1\r\n"));
+        let down = relays(&server).unwrap_err();
+        assert_eq!((down.key, down.params["server"]["key"].as_str()), ("backend.relays_unavailable", Some("server.private")));
+    }
+
+    #[test]
+    fn a_long_relay_list_is_cut() {
+        let entry = format!("{{\"region\": \"{}\", \"online\": true}}", "x".repeat(200));
+        let body = format!("HTTP/1.1 200 OK\r\n\r\n{{\"checkedAt\": null, \"relays\": [{}]}}", vec![entry; 100].join(","));
+        let (server, _handle) = backend(Box::leak(Box::new([&*Box::leak(body.into_boxed_str())])));
+        let list = relays(&server).unwrap().unwrap();
+        assert_eq!((list.relays.len(), list.relays[0].region.len()), (MAX_RELAYS, MAX_RELAY_TEXT));
     }
 }

@@ -1,10 +1,10 @@
 import { BackendError, errorMessage, type Invite, type Msg, type PickKind, type Registration, type Session } from "../backend";
 import { t, th, tr } from "../i18n";
 import { avatarPng } from "./avatar";
-import { gb, recognised } from "./components";
+import { gb, recognised, relaysBody } from "./components";
 import { fileName, type ScreenId } from "./meta";
-import { ask, cancelAction, closeModal, confirmIt, refresh, render, toast } from "./overlay";
-import { DP, F, PR, REC, S, SAVED, UPD, app, applyFiles, applySession, backend, dirty, dirtyP, installing, log, logMsg, needsInstall } from "./state";
+import { ask, cancelAction, closeModal, confirmIt, refresh, render, root, toast } from "./overlay";
+import { DP, F, PR, REC, RELAYS, S, SAVED, UPD, app, applyFiles, applySession, backend, dirty, dirtyP, installing, log, logMsg, needsInstall } from "./state";
 
 export async function attempt<T>(fn: () => Promise<T>): Promise<T | undefined> {
   try {
@@ -47,10 +47,46 @@ export async function stopGame(line: Msg = logMsg("log.event.gameClosed")): Prom
   }
 }
 
+/** Redraws only the relay list, so a field of the Advanced screen being typed in keeps the focus. */
+export function showRelays(): void {
+  const el = root.querySelector("[data-relays-body]");
+  if (el) el.innerHTML = relaysBody();
+}
+
+/** An answer younger than this is shown again when Advanced is opened: the server checks once a minute. */
+const RELAYS_FRESH = 60_000;
+/** While Advanced stays open the list is asked again this often. */
+export const RELAYS_STALE = 5 * 60_000;
+
+/** Asks the server in use for its relay list, unless the last request is younger than `maxAge` ms. */
+export async function loadRelays(maxAge = RELAYS_FRESH): Promise<void> {
+  const server = SAVED.usePrivateServer ? SAVED.privateServer : "";
+  if (server !== RELAYS.server) Object.assign(RELAYS, { server, data: undefined, failed: false, asked: 0 });
+  if (RELAYS.busy || Date.now() - RELAYS.asked < maxAge) return;
+  RELAYS.busy = true;
+  RELAYS.asked = Date.now();
+  let data: typeof RELAYS.data;
+  try {
+    data = await backend.getRelays();
+  } catch {
+    data = undefined;
+  }
+  RELAYS.busy = false;
+  if (server !== RELAYS.server) return;
+  RELAYS.failed = data === undefined;
+  if (data !== undefined) RELAYS.data = data;
+  showRelays();
+}
+
+function open(to: ScreenId): void {
+  app.scr = to;
+  if (to === "advanced") void loadRelays();
+}
+
 export function go(to: ScreenId): void {
   if (to === app.scr) return;
   if (!dirty()) {
-    app.scr = to;
+    open(to);
     render();
     return;
   }
@@ -61,7 +97,7 @@ export function go(to: ScreenId): void {
       cls: "danger",
       fn: () => {
         discard();
-        app.scr = to;
+        open(to);
         toast(t("toast.changesDiscarded"));
       },
     },
@@ -70,7 +106,7 @@ export function go(to: ScreenId): void {
       cls: "fill",
       fn: () => {
         void save();
-        app.scr = to;
+        open(to);
       },
     },
   ]);
@@ -378,6 +414,7 @@ export async function save(): Promise<void> {
     } catch (e) {
       toast(errorMessage(e), true);
     }
+    if (app.scr === "advanced") void loadRelays();
     render();
   };
   if (PR.in && DP.id.trim() !== PR.id)

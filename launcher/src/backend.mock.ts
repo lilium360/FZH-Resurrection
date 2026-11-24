@@ -600,6 +600,26 @@ export function createMockBackend(hooks: MockHooks): Backend {
     async getServerStatus() {
       return { online: true, players: 128, region: "", network: true, progression: true };
     },
+    /** The community server lists relays, one offline and one not checked yet; a private server has no list, and one whose address starts with `offline` cannot be asked. */
+    async getRelays() {
+      await wait(300);
+      if (!settings.usePrivateServer)
+        return {
+          checkedAt: new Date(Date.now() - 40_000).toISOString(),
+          relays: [
+            { region: "North America", location: "Ashburn, United States", operator: "kestrel-dev", online: false },
+            { region: "Europe", location: "Stockholm, Sweden", operator: "lilium360", online: true },
+            { region: "Europe", location: "Frankfurt, Germany", operator: "nordlicht", online: true },
+            { region: "Asia", location: "Singapore", operator: "lilium360", online: true },
+            { region: "South America", location: "São Paulo, Brazil", operator: "tucano", online: null },
+          ],
+        };
+      if (settings.privateServer.toLowerCase().startsWith("offline")) {
+        const server = serverName();
+        throw err("server_unreachable", "backend.relays_unavailable", `Cannot get the relay status from the ${server.message}.`, { server });
+      }
+      return null;
+    },
     async getHosting() {
       return clone(hosting);
     },

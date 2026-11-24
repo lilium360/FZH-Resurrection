@@ -130,6 +130,29 @@ What to know before you offer one:
 The services of the community server other than the relays are the build-time `FZH_DEFAULT_SERVER`
 of the launcher ([building.md](building.md#release-build)).
 
+### Relay status
+
+The launcher's Advanced screen lists the relays by region, with who hosts each one and whether
+it is online. Launchers never ask the relays: they ask the backend of the server they play on
+(`GET /status/v1/relays`), and the backend answers from what it found itself. It does that only
+when `FZH_RELAY_LIST` names a list file: every minute it sends each relay of the file one
+registration for an address that is not its own, which a relay confirms and does not keep, and
+keeps the result in memory. The file is the operator's own list, in the format of `relays.json`
+above; it is read again when it changes, so a new list needs no restart. The answer leaves the
+addresses out.
+
+The setting is empty after an installation, and the backend then has no such endpoint (`404`):
+the launcher says that the server publishes no relay list. To turn it on, copy your list
+next to the backend's data and name it in `config.env` or `.env`, then restart the backend:
+
+```
+cp relays.json "$FZH_ROOT/data/relays.json"        # without Docker
+FZH_RELAY_LIST="$FZH_ROOT/data/relays.json"        # in config.env
+
+sudo cp relays.json /srv/fzh/backend/relays.json   # Docker: the backend sees this folder as /data
+FZH_RELAY_LIST=/data/relays.json                   # in .env
+```
+
 ## Network
 
 Open inbound in the provider's network firewall (security list, security group): TCP 31313,
@@ -170,12 +193,13 @@ In `.env` (Docker) or `config.env` (without Docker); an empty value keeps the de
 | `FZH_RESERVED_NAMES` | empty | Online IDs refused in addition to the built-in list (admin, moderator, system, the project's names...), comma-separated. |
 | `FZH_TRUSTED_PROXY_HEADER` | empty | Behind a reverse proxy: the header with the client address, e.g. `X-Forwarded-For`. |
 | `FZH_TRUSTED_PROXIES` | `127.0.0.1,::1` | Addresses whose `FZH_TRUSTED_PROXY_HEADER` is believed. |
+| `FZH_RELAY_LIST` | empty | A list of relays to check and publish with their status ("Relay status" above). Empty: off. |
 
 Limits and sessions are per client address: the TCP peer, or the last entry of the proxy header
 when the request comes from a trusted proxy. Leave the header empty without a proxy, or anyone
 could choose their address. Players behind one public address (a household, carrier-grade NAT)
-share the registration limits. Besides the settings, every address may make 30 account requests
-per 10 minutes and 20 game logins per 10 minutes. The limit counters are kept in memory and
+share the registration limits. Besides the settings, every address may make 30 account requests,
+20 game logins and 60 relay status requests per 10 minutes. The limit counters are kept in memory and
 cleared by a restart; grants and sessions are kept in `backend-auth.json`.
 
 ## Backups

@@ -10,11 +10,12 @@ passwords, tokens, codes and keys removed.
   python backend.py [--host 127.0.0.1] [--port 1338] [--data FILE] [--log FILE] ...
 
 `python backend.py --help` lists the settings; each has an FZH_* environment variable.
-On any address other than loopback only the game's API (/parse/, the login service, avatars) and
-/account/v1/ are served. Request bodies are capped at 1 MB.
+On any address other than loopback only the game's API (/parse/, the login service, avatars),
+/account/v1/ and /status/v1/ are served. Request bodies are capped at 1 MB.
 """
-import argparse, base64, collections, datetime, json, os, re, secrets, struct, threading, time
+import argparse, base64, collections, datetime, json, os, re, secrets, socket, struct, threading, time
 import urllib.error, urllib.parse, urllib.request, uuid, zlib
+from concurrent.futures import ThreadPoolExecutor
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, parse_qsl, urlencode, urlparse
 
@@ -57,7 +58,19 @@ MAX_GAME_STATS = 1000
 CATALOGUE_FIELDS = ("productId", "category", "name", "unlockLevel", "cost", "klass")
 
 API_LIMIT = (30, 600)
+STATUS_LIMIT = (60, 600)
 GAME_LOGIN_LIMIT = (20, 600)
+
+RELAY_PORT = 31316
+# A REGISTER of the relay protocol (server/relay/relay.py) for an address that is not the
+# sender's: a relay answers it with a CONFIRM and does not keep it.
+RELAY_PROBE = b"FZR1" + bytes([1, 1]) + socket.inet_aton("203.0.113.1") + struct.pack("!H", 3658)
+RELAY_ROUND = 60
+RELAY_TRIES = 2
+RELAY_TIMEOUT = 2.0
+RELAY_WORKERS = 8
+MAX_RELAYS = 64
+MAX_RELAY_TEXT = 64
 
 SECRET_NAME = re.compile(r"(?i)pass|secret|token|key|auth|^code$")
 SECRET_HEADERS = {"cookie", "x-parse-application-id", "x-parse-rest-api-key", "x-parse-session-token"}
@@ -343,7 +356,88 @@ class AuthStore:
             return any(s["ip"] == ip and s["expires"] > now for s in self.sessions.values())
 
 
-auth = limiter = None
+def relay_online(address):
+    """Whether the relay at host[:port] answers the probe. A host name that does not resolve is
+    a relay that does not answer."""
+    host, _, port = address.rpartition(":")
+    target = (host, int(port)) if host and port.isdigit() else (address, RELAY_PORT)
+    for _ in range(RELAY_TRIES):
+        try:
+            with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+                s.settimeout(RELAY_TIMEOUT)
+                s.sendto(RELAY_PROBE, target)
+                reply, _ = s.recvfrom(64)
+        except (OSError, ValueError, OverflowError):
+            continue
+        if reply[:5] == b"FZR1\x02":
+            return True
+    return False
+
+
+class RelayWatch:
+    """The relays of a list file ([{"address", "region", "location", "operator"}], as
+    server/relay/relays.json), probed from here once a minute so that launchers ask this server
+    and never the relays. `reply` is the answer of GET /status/v1/relays, replaced as a whole
+    after each round. The file is read again when it changes; one that cannot be read leaves
+    the last list in place."""
+
+    def __init__(self, path):
+        self.path = path
+        self.stamp = ()
+        self.relays = []
+        self.online = {}
+        self.checked = None
+        self.reply = {"checkedAt": None, "relays": []}
+        self.stop = threading.Event()
+        self.read()
+        threading.Thread(target=self.run, daemon=True).start()
+
+    def read(self):
+        try:
+            st = os.stat(self.path)
+            stamp = (st.st_mtime_ns, st.st_size)
+        except OSError:
+            stamp = None
+        if stamp == self.stamp:
+            return
+        self.stamp = stamp
+        try:
+            with open(self.path, encoding="utf-8") as f:
+                entries = json.load(f)
+        except (OSError, ValueError) as e:
+            write_log("=== relay list: cannot read %s: %s" % (self.path, e))
+            return
+
+        def text(entry, key):
+            return entry[key][:MAX_RELAY_TEXT] if isinstance(entry.get(key), str) else ""
+
+        self.relays = [{"address": e["address"], "region": text(e, "region"), "location": text(e, "location"),
+                        "operator": text(e, "operator")}
+                       for e in (entries if isinstance(entries, list) else [])
+                       if isinstance(e, dict) and isinstance(e.get("address"), str) and e["address"]][:MAX_RELAYS]
+        write_log("=== relay list: %d relays in %s" % (len(self.relays), self.path))
+        self.publish()
+
+    def publish(self):
+        self.reply = {"checkedAt": self.checked,
+                      "relays": [{"region": r["region"], "location": r["location"], "operator": r["operator"],
+                                  "online": self.online.get(r["address"])} for r in self.relays]}
+
+    def run(self):
+        while not self.stop.is_set():
+            try:
+                self.read()
+                addresses = [r["address"] for r in self.relays]
+                with ThreadPoolExecutor(RELAY_WORKERS) as pool:
+                    self.online = dict(zip(addresses, pool.map(relay_online, addresses)))
+                self.checked = now_iso()
+                self.publish()
+            except Exception as e:
+                write_log("=== relay check failed: %s: %s" % (type(e).__name__, e))
+            self.stop.wait(RELAY_ROUND)
+
+
+auth = limiter = relay_watch = None
 
 
 def fail(status, code, message, **extra):
@@ -439,6 +533,8 @@ class Handler(BaseHTTPRequestHandler):
             return 200, plain_png("")
         if path.startswith("/account/"):
             return self.account(method, path, body)
+        if path.startswith("/status/"):
+            return self.status(method, path)
         if self.remote and not (path.startswith("/parse/") or path in ("", "/")):
             return 404, {"code": 141, "error": "not implemented"}
         if "/parse/" in path:
@@ -499,6 +595,19 @@ class Handler(BaseHTTPRequestHandler):
             self.extra_headers.append(("Allow", allowed))
             return fail(405, "method_not_allowed", "Use %s." % allowed)
         return handler()
+
+    def status(self, method, path):
+        """The relay list with what the last round found; no such endpoint without --relay-list."""
+        if relay_watch is None or path != "/status/v1/relays":
+            return fail(404, "not_found", "No such endpoint.")
+        wait = limiter.take("status|" + self.ip, *STATUS_LIMIT)
+        if wait:
+            return self.too_many(wait)
+        if method != "GET":
+            self.extra_headers.append(("Allow", "GET"))
+            return fail(405, "method_not_allowed", "Use GET.")
+        self.extra_headers.append(("Cache-Control", "max-age=30"))
+        return 200, relay_watch.reply
 
     def too_many(self, wait):
         self.extra_headers.append(("Retry-After", str(wait)))
@@ -782,7 +891,7 @@ class Handler(BaseHTTPRequestHandler):
 
 def build(argv=None):
     """Parses the settings and returns the server, not yet serving."""
-    global auth, limiter
+    global auth, limiter, relay_watch
 
     def env(name, default):
         return os.environ.get(name) or default
@@ -819,6 +928,9 @@ def build(argv=None):
                         "(default: none, the TCP peer is the client)")
     p.add_argument("--trusted-proxies", default=env("FZH_TRUSTED_PROXIES", "127.0.0.1,::1"),
                    help="addresses whose --trusted-proxy-header is believed (default 127.0.0.1,::1)")
+    p.add_argument("--relay-list", default=env("FZH_RELAY_LIST", ""),
+                   help="JSON list of relays (as server/relay/relays.json) to probe once a minute and "
+                        "publish with their status at /status/v1/relays (default: none, no such endpoint)")
     a = p.parse_args(argv)
     if a.game_login not in ("", "grant", "open"):
         p.error("FZH_GAME_LOGIN must be grant or open")
@@ -845,11 +957,14 @@ def build(argv=None):
         os.makedirs(os.path.dirname(path), exist_ok=True)
     auth = AuthStore(config.auth)
     limiter = Limiter()
-    started = "=== backend started %s on %s:%d, registration %s, game login %s, %d products ===" % (
+    started = "=== backend started %s on %s:%d, registration %s, game login %s, %d products, relay list %s ===" % (
         time.strftime("%Y-%m-%d %H:%M:%S"), a.host, a.port, "on" if config.shadnet_game else "off",
-        config.game_login, load_catalogue(a.catalogue))
+        config.game_login, load_catalogue(a.catalogue), "on" if a.relay_list else "off")
     write_log(started)
     print(started, flush=True)
+    if relay_watch:
+        relay_watch.stop.set()
+    relay_watch = RelayWatch(os.path.abspath(a.relay_list)) if a.relay_list else None
     return ThreadingHTTPServer((a.host, a.port), Handler)
 
 

@@ -1,9 +1,9 @@
 import banner from "../assets/banner.jpg";
-import { CONTROLLER_BUTTONS, type DumpInfo, type Friend, type Msg, type PickKind } from "../backend";
+import { CONTROLLER_BUTTONS, type DumpInfo, type Friend, type Msg, type PickKind, type Relay } from "../backend";
 import { escapeHtml, has, html, number, size, t, th, tr } from "../i18n";
 import { I } from "./icons";
 import { KEYS, M, fileName, type SettingKey } from "./meta";
-import { APP, CACHE, CHECK, F, PR, UPD, app, installing, missing, needsInstall, pkgChosen, S, type AvatarChoice } from "./state";
+import { APP, CACHE, CHECK, F, PR, RELAYS, UPD, app, installing, missing, needsInstall, pkgChosen, S, type AvatarChoice } from "./state";
 
 export const esc = escapeHtml;
 
@@ -358,6 +358,50 @@ export function presenceText(f: Friend): string {
   if (p.state === "online") return t("presence.online");
   return ago(p.lastSeen);
 }
+
+/** The regions of the public list in the order they are shown; any other name follows as the server gives it. */
+const RELAY_REGIONS = ["europe", "northAmerica", "southAmerica", "asia", "oceania", "africa"];
+
+function relayRegions(relays: Relay[]): [string, Relay[]][] {
+  const groups = new Map<string, { rank: number; label: string; relays: Relay[] }>();
+  for (const r of relays) {
+    const name = r.region.trim();
+    const rank = RELAY_REGIONS.findIndex((k) => k.toLowerCase() === name.replace(/\s+/g, "").toLowerCase());
+    const id = rank < 0 ? name : (RELAY_REGIONS[rank] ?? name);
+    const g = groups.get(id) ?? { rank: rank < 0 ? RELAY_REGIONS.length : rank, label: rank < 0 ? name || t("relays.region.unnamed") : t(`relays.region.${id}`), relays: [] };
+    g.relays.push(r);
+    groups.set(id, g);
+  }
+  return [...groups.values()].sort((a, b) => a.rank - b.rank).map((g) => [g.label, g.relays]);
+}
+
+function relaysChecked(iso: string | null): string {
+  const mins = iso ? Math.max(0, Math.round((Date.now() - Date.parse(iso)) / 60000)) : NaN;
+  if (Number.isNaN(mins)) return t("relays.notChecked");
+  if (mins < 1) return t("relays.updatedNow");
+  return mins < 60 ? t("relays.updatedMinutes", { count: mins }) : t("relays.updatedHours", { count: Math.round(mins / 60) });
+}
+
+/** The relay list of the server in use, or one line when there is none to show. */
+export function relaysBody(): string {
+  const list = RELAYS.data?.relays ?? [];
+  const failed = RELAYS.failed ? `${th("relays.unavailable")} <button class="b-link" data-relays>${th("relays.retry")}</button>` : "";
+  if (!list.length)
+    return `<p class="b-note">${failed || th(RELAYS.data === undefined ? "relays.loading" : "relays.noList")}</p>`;
+  const status = (r: Relay) =>
+    r.online === null
+      ? `<span class="st"><i class="dot"></i>${th("relays.unknown")}</span>`
+      : `<span class="st ${r.online ? "ok" : "bad"}"><i class="dot ${r.online ? "ok" : "bad"}"></i>${th(r.online ? "relays.online" : "relays.offline")}</span>`;
+  return (
+    `<div class="b-two" style="gap:6px 40px;margin-top:0">${relayRegions(list)
+      .map(([region, relays]) => `<div><h6>${esc(region)}</h6>${relays.map((r) => btnRow(esc(r.location), th("relays.hostedBy", { operator: r.operator }), status(r))).join("")}</div>`)
+      .join("")}</div>` +
+    `<p class="b-note b-sub">${failed || esc(relaysChecked(RELAYS.data?.checkedAt ?? null))} ${th("relays.hostQuestion")} <button class="b-link" data-link="relays">${th("relays.hostLink")}</button></p>`
+  );
+}
+
+export const relaysBox = (): string =>
+  `<div class="b-rows b-pad" style="margin-top:12px"><h6>${th("relays.title")}</h6><p class="b-note">${th("relays.intro")}</p><div data-relays-body>${relaysBody()}</div></div>`;
 
 export interface FriendRow {
   id: string;

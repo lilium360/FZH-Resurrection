@@ -11,7 +11,7 @@ import "./styles.css";
 import { loadBackend, type Backend } from "./backend";
 import type { MockHooks } from "./backend.mock";
 import { setLang, t } from "./i18n";
-import { checkUpdate, loadPlan, prepare, showInvite, signedOut, syncAvatar } from "./ui/actions";
+import { RELAYS_STALE, checkUpdate, loadPlan, loadRelays, prepare, showInvite, showRelays, signedOut, syncAvatar } from "./ui/actions";
 import { esc, updateProgress } from "./ui/components";
 import { bindEvents, initialScreen } from "./ui/events";
 import { initTips } from "./ui/tips";
@@ -145,6 +145,14 @@ async function boot(): Promise<void> {
   else if (F.base && F.update && F.prep === 0 && !app.run && CACHE.status !== "warming") void prepare();
 
   void checkUpdate(true);
+
+  if (app.scr === "advanced") void loadRelays();
+  // While Advanced stays open: the age of the relay status every minute, a new answer every few.
+  setInterval(() => {
+    if (app.scr !== "advanced") return;
+    showRelays();
+    void loadRelays(RELAYS_STALE);
+  }, 60_000);
 }
 
 initTips();

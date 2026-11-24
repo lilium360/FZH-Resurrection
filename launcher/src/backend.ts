@@ -273,6 +273,22 @@ export interface ServerStatus {
   progression: boolean;
 }
 
+export interface Relay {
+  /** English, as the list has it: "Europe", "North America", ... */
+  region: string;
+  location: string;
+  operator: string;
+  /** Null: the server has not checked it yet. */
+  online: boolean | null;
+}
+
+/** The relays the server in use lists and what its own last check found; the launcher never asks a relay. */
+export interface RelayList {
+  /** ISO time of the server's last check; null before the first one. */
+  checkedAt: string | null;
+  relays: Relay[];
+}
+
 export interface HostingState {
   running: boolean;
   services: { network: boolean; progression: boolean; relay: boolean };
@@ -319,8 +335,8 @@ export interface LogLine {
   params?: Params;
 }
 
-/** The source repository, its licence, the bundled licence texts, the page where a problem report is filed. */
-export type ExternalLink = "source" | "licence" | "licences" | "issues";
+/** The source repository, its licence, the bundled licence texts, the page where a problem report is filed, how to host a relay. */
+export type ExternalLink = "source" | "licence" | "licences" | "issues" | "relays";
 
 export type BackendErrorCode =
   | "invalid_input"
@@ -441,6 +457,8 @@ export interface Backend {
   removeFriend(onlineId: string): Promise<FriendsState>;
 
   getServerStatus(): Promise<ServerStatus>;
+  /** Null when the server in use publishes no relay list; fails when it cannot be asked. */
+  getRelays(): Promise<RelayList | null>;
   getHosting(): Promise<HostingState>;
   startHosting(): Promise<HostingState>;
   stopHosting(): Promise<HostingState>;

@@ -319,6 +319,29 @@
     "relay": { "label": "Connection relay", "note": "Helps friends connect when the direct route fails." }
   },
 
+  "relays": {
+    "title": "Connection relays",
+    "intro": "When two players cannot connect directly, their traffic goes through a relay. Volunteers of the community host them.",
+    "region": {
+      "europe": "Europe", "northAmerica": "North America", "southAmerica": "South America",
+      "asia": "Asia", "oceania": "Oceania", "africa": "Africa", "unnamed": "Other"
+    },
+    "hostedBy": "Hosted by {operator}",
+    "online": "Online",
+    "offline": "Offline",
+    "unknown": "Unknown",
+    "updatedNow": "Status updated just now.",
+    "updatedMinutes": { "one": "Status updated a minute ago.", "other": "Status updated {count} minutes ago." },
+    "updatedHours": { "one": "Status updated an hour ago.", "other": "Status updated {count} hours ago." },
+    "notChecked": "The server has not checked the relays yet.",
+    "hostQuestion": "Want to host a relay in your region?",
+    "hostLink": "Here is how",
+    "loading": "Asking the server…",
+    "noList": "This server does not publish a list of relays.",
+    "unavailable": "Relay status not available right now.",
+    "retry": "Try again"
+  },
+
   "key": { "friendsPanel": "Friends panel", "fpsCounter": "FPS counter" },
   "keyNote": "These shortcuts work on the game window on the monitor.",
 
@@ -765,6 +788,7 @@
     "account_rate_limited": "Too many attempts from this network. Try again in {seconds}.",
     "account_shadnet_down": "The server cannot handle accounts right now. Try again later.",
     "account_unreachable": "Cannot reach the account service of the {server}.",
+    "relays_unavailable": "Cannot get the relay status from the {server}.",
     "account_bad_reply": "The account service gave an unexpected answer.",
     "account_server_error": "The account service failed (HTTP {code}).",
     "play_code_refused": "The server did not accept the launcher's confirmation.",

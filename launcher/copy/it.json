@@ -319,6 +319,29 @@
     "relay": { "label": "Relay di connessione", "note": "Aiuta gli amici a connettersi quando il percorso diretto non funziona." }
   },
 
+  "relays": {
+    "title": "Relay di connessione",
+    "intro": "Quando due giocatori non riescono a connettersi direttamente, il loro traffico passa da un relay. Li ospitano volontari della comunità.",
+    "region": {
+      "europe": "Europa", "northAmerica": "Nord America", "southAmerica": "Sud America",
+      "asia": "Asia", "oceania": "Oceania", "africa": "Africa", "unnamed": "Altro"
+    },
+    "hostedBy": "Ospitato da {operator}",
+    "online": "Online",
+    "offline": "Offline",
+    "unknown": "Sconosciuto",
+    "updatedNow": "Stato aggiornato adesso.",
+    "updatedMinutes": { "one": "Stato aggiornato un minuto fa.", "other": "Stato aggiornato {count} minuti fa." },
+    "updatedHours": { "one": "Stato aggiornato un'ora fa.", "other": "Stato aggiornato {count} ore fa." },
+    "notChecked": "Il server non ha ancora controllato i relay.",
+    "hostQuestion": "Vuoi ospitare un relay nella tua regione?",
+    "hostLink": "Ecco come",
+    "loading": "Chiedo al server…",
+    "noList": "Questo server non pubblica un elenco di relay.",
+    "unavailable": "Stato dei relay non disponibile al momento.",
+    "retry": "Riprova"
+  },
+
   "key": { "friendsPanel": "Pannello amici", "fpsCounter": "Contatore FPS" },
   "keyNote": "Queste scorciatoie funzionano sulla finestra di gioco, sul monitor.",
 
@@ -765,6 +788,7 @@
     "account_rate_limited": "Troppi tentativi da questa rete. Riprova tra {seconds}.",
     "account_shadnet_down": "Il server non può gestire gli account in questo momento. Riprova più tardi.",
     "account_unreachable": "Impossibile raggiungere il servizio account del {server}.",
+    "relays_unavailable": "Impossibile ottenere lo stato dei relay dal {server}.",
     "account_bad_reply": "Il servizio account ha dato una risposta inattesa.",
     "account_server_error": "Il servizio account non ha funzionato (HTTP {code}).",
     "play_code_refused": "Il server non ha accettato la conferma del launcher.",

@@ -171,6 +171,32 @@ class FakeWebApi:
         self.server.server_close()
 
 
+class FakeRelay:
+    """A relay on a free loopback UDP port that only confirms registrations, as relay.py does."""
+
+    def __init__(self, port=0):
+        self.socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        self.socket.bind(("127.0.0.1", port))
+        self.port = self.socket.getsockname()[1]
+        self.address = "127.0.0.1:%d" % self.port
+        threading.Thread(target=self.serve, daemon=True).start()
+
+    def serve(self):
+        while True:
+            try:
+                packet, sender = self.socket.recvfrom(2048)
+                if packet[:5] == b"FZR1\x01":
+                    self.socket.sendto(b"FZR1\x02", sender)
+            except ConnectionError:
+                # Windows reports here that an earlier reply reached a closed port.
+                continue
+            except OSError:
+                return
+
+    def close(self):
+        self.socket.close()
+
+
 class Backend:
     """backend.py on a free loopback port in a temporary folder. Requests carry X-Test-IP, which
     the backend believes as the client address (trusted proxy header)."""

@@ -188,6 +188,7 @@ pub fn run() {
             commands::decline_friend_request,
             commands::remove_friend,
             commands::get_server_status,
+            commands::get_relays,
             commands::get_hosting,
             commands::start_hosting,
             commands::stop_hosting,

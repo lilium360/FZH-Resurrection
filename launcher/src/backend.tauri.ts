@@ -75,6 +75,7 @@ export function createTauriBackend(): Backend {
     removeFriend: (onlineId) => call("remove_friend", { onlineId }),
 
     getServerStatus: () => call("get_server_status"),
+    getRelays: () => call("get_relays"),
     getHosting: () => call("get_hosting"),
     startHosting: () => call("start_hosting"),
     stopHosting: () => call("stop_hosting"),

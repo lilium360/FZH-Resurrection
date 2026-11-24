@@ -34,6 +34,8 @@ const SOURCE_URL: &str = "https://github.com/lilium360/FZH-Resurrection";
 const LICENCE_URL: &str = "https://github.com/lilium360/FZH-Resurrection/blob/main/LICENSE";
 /// Where the player attaches the saved problem report.
 const ISSUES_URL: &str = "https://github.com/lilium360/FZH-Resurrection/issues/new/choose";
+/// How to host a relay for the community.
+const RELAYS_URL: &str = "https://github.com/lilium360/FZH-Resurrection#help-wanted-servers-and-relays";
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -175,10 +177,11 @@ pub fn install_update(app: AppHandle) -> Res<()> {
 #[tauri::command]
 pub fn open_link(app: AppHandle, state: State<'_, AppState>, target: String) -> Res<()> {
     match target.as_str() {
-        "source" | "licence" | "issues" => {
+        "source" | "licence" | "issues" | "relays" => {
             let url = match target.as_str() {
                 "source" => SOURCE_URL,
                 "licence" => LICENCE_URL,
+                "relays" => RELAYS_URL,
                 _ => ISSUES_URL,
             };
             app.opener().open_url(url, None::<&str>).map_err(|e| BackendError::internal(format!("Cannot open the link: {e}")))
@@ -1022,6 +1025,12 @@ pub async fn remove_friend(app: AppHandle, online_id: String) -> Res<FriendsStat
 #[tauri::command]
 pub async fn get_server_status(app: AppHandle) -> Res<ServerStatus> {
     blocking(&app, |a| Ok(a.state::<AppState>().account.server_status(&env(a)))).await
+}
+
+/// The relay list of the server in use, from its backend; null when it publishes none.
+#[tauri::command]
+pub async fn get_relays(app: AppHandle) -> Res<Option<crate::backend_api::RelayList>> {
+    blocking(&app, |a| crate::backend_api::relays(&store::load_settings(&a.state::<AppState>().layout.settings_json()).server())).await
 }
 
 /// Commands whose controls the UI keeps disabled (docs/launcher-contract.md, "Status").

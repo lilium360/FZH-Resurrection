@@ -9,6 +9,7 @@ import {
   discard,
   install,
   checkUpdate,
+  loadRelays,
   downloadUpdate,
   go,
   launch,
@@ -66,6 +67,15 @@ async function onClick(e: MouseEvent): Promise<void> {
 
   if ((b = q("[data-go]"))) {
     go(b.dataset.go as ScreenId);
+    return;
+  }
+  const link = q("[data-link]");
+  if (link) {
+    await attempt(() => backend.openLink(link.dataset.link as ExternalLink));
+    return;
+  }
+  if (q("[data-relays]")) {
+    await loadRelays(0);
     return;
   }
   if ((b = q("[data-choose]"))) {
