@@ -1,6 +1,6 @@
 [package]
 name = "fzh-launcher"
-version = "0.2.5"
+version = "0.2.6"
 description = "FZH:Resurrection launcher"
 license = "GPL-2.0-or-later"
 edition = "2021"
