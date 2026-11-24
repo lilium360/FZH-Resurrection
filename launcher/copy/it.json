@@ -321,7 +321,7 @@
 
   "relays": {
     "title": "Relay di connessione",
-    "intro": "Quando due giocatori non riescono a connettersi direttamente, il loro traffico passa da un relay. Li ospitano volontari della comunità.",
+    "intro": "Quando due giocatori non riescono a connettersi direttamente, il loro traffico passa da un relay. Li ospitano volontari della community.",
     "region": {
       "europe": "Europa", "northAmerica": "Nord America", "southAmerica": "Sud America",
       "asia": "Asia", "oceania": "Oceania", "africa": "Africa", "unnamed": "Altro"
