@@ -32,19 +32,15 @@ OpenXR. A Windows launcher handles game setup, accounts, friends and updates. Th
 
 ## Help wanted: servers and relays
 
-The public server runs on a free, low-powered VPS. If you can spare a VPS, or even just host a
-relay in another region, please reach out through this repository's
-[Issues](https://github.com/lilium360/FZH-Resurrection/issues) or
-[Discussions](https://github.com/lilium360/FZH-Resurrection/discussions).
+The community server runs on a small free VPS in Stockholm, with one additional relay in Singapore. When two players cannot connect directly their traffic goes through a relay, and the relay's distance from them becomes their latency. Relays in other regions are what is missing, North America first, then South America and Oceania. Running one is lightweight: a single Python script (`server/relay/relay.py`, standard library only), one inbound UDP port (31316 by default), a few megabytes of memory and nothing stored on disk. The emulator registers with every listed relay and two players use the one with the shortest round trip.
 
-A relay only carries traffic when players cannot connect directly, but when it does the
-relay's distance from the players becomes their latency, so a relay on another continent adds lag.
-Running one is lightweight: a single Python script (`server/relay/relay.py`, standard library
-only), one inbound UDP port (31316 by default), a few megabytes of memory and nothing stored on
-disk. A server address can list up to 8 relays; the emulator registers with all of them and
-players use the one with the shortest round trip. For the community server the relay list is built
-into the launcher, so a new relay reaches everyone with the next release.
-Details in [docs/self-hosting.md](docs/self-hosting.md#hosting-only-a-relay).
+To add a relay:
+
+1. Start `relay.py` on your machine and open the UDP port inbound. See [docs/self-hosting.md](docs/self-hosting.md#hosting-only-a-relay) for details.
+2. Check it with `python tools/check-relays.py host:port`.
+3. Add an entry to `server/relay/relays.json` and open a pull request.
+
+The list is compiled into the launcher at release time, so a new relay reaches players with the next release. Up to 8 relays ship per release; the maintainers pick from the list, aiming for one or two per region. If you can offer a whole server rather than a relay, please reach out through [Issues](https://github.com/lilium360/FZH-Resurrection/issues) or [Discussions](https://github.com/lilium360/FZH-Resurrection/discussions).
 
 ## Status
 

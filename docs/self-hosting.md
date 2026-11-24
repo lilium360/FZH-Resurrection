@@ -89,9 +89,46 @@ registers with all of them and two players agree on one relay both registered wi
 the shorter round trip. A relay that stops answering is dropped within a few seconds and new
 connections use another, but a match that was running through it has been lost in tests.
 
-For the community server the address, relays included, is the build-time `FZH_DEFAULT_SERVER` of
-the launcher ([building.md](building.md#release-build)): a new relay reaches players with the next
-launcher release.
+### Adding your relay to the list
+
+The relays of the community server are listed in [`server/relay/relays.json`](../server/relay/relays.json).
+To add yours:
+
+1. Run the relay as above, on a machine that stays on, with an address that does not change (a host
+   name, or a fixed IP address) and the UDP port open inbound.
+2. Check that it answers from outside its own network:
+
+   ```
+   python tools/check-relays.py relay.example.org:31316
+   ```
+
+   It prints the round trip in milliseconds, or `no answer`.
+3. Fork the repository, add one entry at the end of `relays.json` and open a pull request:
+
+   ```json
+   {"address": "relay.example.org:31316", "region": "North America", "location": "Ashburn, United States", "operator": "your-github-name"}
+   ```
+
+   `address` is `host` or `host:port` (31316 when left out); `region` is one of Europe, North
+   America, South America, Asia, Oceania, Africa; `operator` is the GitHub account to contact when
+   the relay stops answering.
+
+What to know before you offer one:
+
+- A relay sees the IP addresses of the players it serves and carries their game traffic. Run
+  `relay.py` as it is in this repository: it logs counts only, never payloads or addresses beyond
+  the registrations it prints, and stores nothing.
+- Traffic is small: about 20 MB an hour for each pair of players that goes through the relay.
+- The list is compiled into the launcher when a release is built (`tools/release.ps1`), so a new
+  relay reaches players with the next launcher release, and a removed one stays in older launchers
+  until they update. A launcher uses up to 8 relays: the maintainers take them from the list in
+  order, aiming for one or two in each region, and may leave out or remove a relay that does not
+  answer (`python tools/check-relays.py` checks them all).
+- To stop, open a pull request that removes your entry, or an issue; then keep the relay running
+  until the next launcher release if you can.
+
+The services of the community server other than the relays are the build-time `FZH_DEFAULT_SERVER`
+of the launcher ([building.md](building.md#release-build)).
 
 ## Network
 

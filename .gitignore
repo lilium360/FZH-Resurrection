@@ -46,3 +46,6 @@ Thumbs.db
 
 # backend account store
 backend-auth.json
+
+# Writing guide for the launcher's texts: kept out of the repository
+/launcher/copy/voice.md

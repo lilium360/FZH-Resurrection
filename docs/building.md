@@ -65,7 +65,9 @@ licence texts. The NSIS installer ends up in `src-tauri/target/release/bundle/ns
 | `FZH_VC_CRT` | newest local `Microsoft.VC14x.CRT` | Folder with the x64 Visual C++ runtime DLLs. |
 
 `FZH_DEFAULT_SERVER` is the only place the public server's address lives: it is compiled in and is
-in no file of the repo. It takes the same address a player types for a private server:
+in no file of the repo, except for its relays, which are public in `server/relay/relays.json`
+(`tools/release.ps1` adds them to an address given without relays). It takes the same address a
+player types for a private server:
 
 - `host`: every service on its standard port (shadNet TCP 31313 and UDP 31314, WebAPI TCP 31315,
   backend TCP 1338, relay UDP 31316);

@@ -9,7 +9,9 @@
 # The private key is TAURI_SIGNING_PRIVATE_KEY (a path or the key itself), else
 # %USERPROFILE%\.tauri\fzh-resurrection.key.
 #
-# -Server   compiled in as FZH_DEFAULT_SERVER (docs\building.md); it is written to no file
+# -Server   compiled in as FZH_DEFAULT_SERVER (docs\building.md); it is written to no file. Without
+#           a relay part ("/relay,relay") the relays of server\relay\relays.json are added, the
+#           first 8 in the order of the list
 # -FormerServers  optional, compiled in as FZH_FORMER_SERVERS: the addresses the community server
 #           had before it moved, separated by commas, so that players stay signed in
 # -Notes    one change per line; shown by the launcher under About > What's new
@@ -118,6 +120,12 @@ if (-not $env:TAURI_SIGNING_PRIVATE_KEY_PASSWORD) {
     $stored = [FzhCredential]::Read($credential)
     $env:TAURI_SIGNING_PRIVATE_KEY_PASSWORD = if ($stored) { $stored } else { Read-Password }
     $typed = $true
+}
+if ($Server -notmatch '/') {
+    $list = Get-Content (Join-Path $repo 'server\relay\relays.json') -Raw | ConvertFrom-Json
+    $relays = @(foreach ($relay in $list) { $relay.address })
+    if ($relays.Count -gt 8) { Write-Host "Using the first 8 of $($relays.Count) relays of relays.json" }
+    if ($relays.Count) { $Server = $Server + '/' + (($relays | Select-Object -First 8) -join ',') }
 }
 $env:FZH_DEFAULT_SERVER = $Server
 $env:FZH_FORMER_SERVERS = $FormerServers
