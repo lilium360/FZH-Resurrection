@@ -140,7 +140,7 @@ export const SCREENS: Record<ScreenId, () => string> = {
          ? `<div class="b-grid">${svc("network")}${svc("progression")}${svc("relay")}</div>`
          : privStatus
        : `<div class="b-rows b-pad"><h6>${th("screen.advanced.officialServer")}</h6><div class="b-cache"><i class="dot ${pub.online ? "ok" : ""}"></i>${status}</div><p class="b-note">${th(pub.online ? "screen.advanced.nothingToSetUp" : "screen.advanced.cannotReachOfficial")}</p></div>`
-   }${relaysBox()}`
+   }<div data-relays-box>${relaysBox()}</div>`
     );
   },
 

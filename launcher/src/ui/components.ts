@@ -3,7 +3,7 @@ import { CONTROLLER_BUTTONS, type DumpInfo, type Friend, type Msg, type PickKind
 import { escapeHtml, has, html, number, size, t, th, tr } from "../i18n";
 import { I } from "./icons";
 import { KEYS, M, fileName, type SettingKey } from "./meta";
-import { APP, CACHE, CHECK, F, PR, RELAYS, UPD, app, installing, missing, needsInstall, pkgChosen, S, type AvatarChoice } from "./state";
+import { APP, CACHE, CHECK, F, PR, RELAYS, SAVED, UPD, app, installing, missing, needsInstall, pkgChosen, S, type AvatarChoice } from "./state";
 
 export const esc = escapeHtml;
 
@@ -400,8 +400,11 @@ export function relaysBody(): string {
   );
 }
 
+/** The relay section. Not shown while the switch differs from the saved choice, nor for a private server without a list. */
 export const relaysBox = (): string =>
-  `<div class="b-rows b-pad" style="margin-top:12px"><h6>${th("relays.title")}</h6><p class="b-note">${th("relays.intro")}</p><div data-relays-body>${relaysBody()}</div></div>`;
+  S.usePrivateServer !== SAVED.usePrivateServer || (SAVED.usePrivateServer && !RELAYS.data?.relays.length)
+    ? ""
+    : `<div class="b-rows b-pad" style="margin-top:12px"><h6>${th("relays.title")}</h6><p class="b-note">${th("relays.intro")}</p><div data-relays-body>${relaysBody()}</div></div>`;
 
 export interface FriendRow {
   id: string;

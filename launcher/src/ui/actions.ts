@@ -1,7 +1,7 @@
 import { BackendError, errorMessage, type Invite, type Msg, type PickKind, type Registration, type Session } from "../backend";
 import { t, th, tr } from "../i18n";
 import { avatarPng } from "./avatar";
-import { gb, recognised, relaysBody } from "./components";
+import { gb, recognised, relaysBox } from "./components";
 import { fileName, type ScreenId } from "./meta";
 import { ask, cancelAction, closeModal, confirmIt, refresh, render, root, toast } from "./overlay";
 import { DP, F, PR, REC, RELAYS, S, SAVED, UPD, app, applyFiles, applySession, backend, dirty, dirtyP, installing, log, logMsg, needsInstall } from "./state";
@@ -49,8 +49,8 @@ export async function stopGame(line: Msg = logMsg("log.event.gameClosed")): Prom
 
 /** Redraws only the relay list, so a field of the Advanced screen being typed in keeps the focus. */
 export function showRelays(): void {
-  const el = root.querySelector("[data-relays-body]");
-  if (el) el.innerHTML = relaysBody();
+  const el = root.querySelector("[data-relays-box]");
+  if (el) el.innerHTML = relaysBox();
 }
 
 /** An answer younger than this is shown again when Advanced is opened: the server checks once a minute. */
